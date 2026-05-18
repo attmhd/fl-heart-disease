@@ -1,7 +1,10 @@
 [project]
 name = "heart-disease-fl"
 version = "0.1.0"
-description = "Add your description here"
+description = "Thesis Project : Experiment Tracking and Model Registry on Heart Disease Classification using MLflow and Flower"
+authors = [
+    { name = "Muhammad Attan", email = "2022610013.attan@itp.ac.id" }
+]
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
