@@ -1,0 +1,11 @@
+[project]
+name = "heart-disease-fl"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "flower>=2.0.1",
+    "mlflow>=3.12.0",
+    "scikit-learn>=1.8.0",
+]
