@@ -1,5 +1,6 @@
 import numpy as np
 
+
 def get_client_stats(y):
     unique, counts = np.unique(y, return_counts=True)
     dist = dict(zip(unique, counts))

@@ -1,10 +1,11 @@
-import mlflow
-from src.models import model
-from src.utils import model_utils
-from configs import config
-import numpy as np
-import flwr as fl
 from datetime import datetime
+
+import flwr as fl
+import mlflow
+
+from configs import config
+from models import model
+from utils import model_utils
 
 # MLflow setup
 mlflow.set_tracking_uri(config.MLFLOW_TRACKING_URI)
@@ -43,7 +44,7 @@ class MLflowStrategy(fl.server.strategy.FedAvg):
                 # Reconstruct global model (hanya untuk logging/registry, tanpa data)
                 ndarrays = fl.common.parameters_to_ndarrays(aggregated_weights)
                 lr_model = model.get_lr_model()
-                
+
                 # Kita set hanya untuk memastikan model valid saat di-log
                 # Karena tidak ada data di server, kita tidak memanggil fit() atau set_initial_params dengan data
                 model_utils.set_model_parameters(lr_model, ndarrays)
@@ -60,13 +61,13 @@ class MLflowStrategy(fl.server.strategy.FedAvg):
 
 def start_server():
     run_name = f"global_logreg_{config.FL_NUM_ROUNDS}r_{datetime.now().strftime('%Y-%m-%d')}"
-    
+
     with mlflow.start_run(run_name=run_name):
         mlflow.set_tag("mlflow.user", "server")
         mlflow.set_tag("handled_by", "Admin Server")
         mlflow.set_tag("project", "Federated Heart Disease")
         mlflow.set_tag("mlflow.note.content", "Eksperimen FL Murni: Server tidak memiliki akses ke dataset. Evaluasi hanya berdasarkan laporan metrik dari client.")
-        
+
         # Log server configurations
         mlflow.log_params({
             "num_rounds": config.FL_NUM_ROUNDS,
