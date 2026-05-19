@@ -8,3 +8,9 @@ wheels/
 
 # Virtual environments
 .venv
+
+# MLflow
+mlruns/
+
+# Ruff cache
+.ruff_cache/

@@ -1,5 +1,6 @@
 import numpy as np
 
+
 def get_model_parameters(model):
     if getattr(model, "fit_intercept", True):
         return [model.coef_, model.intercept_]

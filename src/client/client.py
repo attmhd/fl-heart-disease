@@ -1,13 +1,14 @@
-import mlflow
-import flwr as fl
-import numpy as np
-from src.data import dataset
-from src.models import model
-from src.utils import model_utils
-from src.utils import data_utils
-from configs import config
 from datetime import datetime
+
+import flwr as fl
+import mlflow
+import numpy as np
 from sklearn.metrics import accuracy_score, log_loss
+
+from configs import config
+from data import dataset
+from models import model
+from utils import data_utils, model_utils
 
 # MLflow setup
 mlflow.set_tracking_uri(config.MLFLOW_TRACKING_URI)
@@ -110,7 +111,7 @@ def start_client():
         mlflow.set_tag("handled_by", f"User {config.CLIENT_ID}")
         mlflow.set_tag("project", "Federated Heart Disease")
         mlflow.set_tag("mlflow.note.content", f"Partisipasi client {config.CLIENT_ID} dalam pelatihan Federated Learning untuk deteksi penyakit jantung.")
-        
+
         fl.client.start_client(
             server_address=config.FL_CLIENT_SERVER_ADDRESS,
             client=client.to_client()

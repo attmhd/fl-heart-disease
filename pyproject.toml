@@ -8,7 +8,26 @@ authors = [
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "flower>=2.0.1",
+    "flwr>=1.29.0",
     "mlflow>=3.12.0",
+    "ruff>=0.15.13",
     "scikit-learn>=1.8.0",
 ]
+
+[tool.ruff]
+line-length = 250
+exclude = [
+    ".venv",
+    "__pycache__",
+    ".ruff_cache",
+    "build",
+    "dist",
+    "htmlcov",
+    "node_modules",
+    "venv",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP"]
+extend-select = ["PLR", "PLW"]
+ignore = ["E741"]
