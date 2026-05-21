@@ -11,6 +11,9 @@ wheels/
 
 # MLflow
 mlruns/
+mlflow.db
 
 # Ruff cache
 .ruff_cache/
+
+.agents/

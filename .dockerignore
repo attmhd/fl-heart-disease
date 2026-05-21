@@ -1,0 +1,29 @@
+# Exclude Python virtual environment and cache
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.ruff_cache/
+.pytest_cache/
+
+# Exclude local models, training artifacts, and experiment tracking
+mlruns/
+mlruns.db
+mlflow.db
+
+# Exclude raw and processed datasets
+data/
+dataset/
+
+# Exclude local Git files
+.git/
+.gitignore
+
+# Exclude IDE and development configs
+.idea/
+.vscode/
+.agents/
+notebook/
+tests/
