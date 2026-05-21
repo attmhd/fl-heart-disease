@@ -10,7 +10,6 @@ from utils import model_utils
 # MLflow setup
 mlflow.set_tracking_uri(config.MLFLOW_TRACKING_URI)
 mlflow.set_experiment(config.MLFLOW_EXPERIMENT_NAME)
-# mlflow.enable_system_metrics_logging() # Di-disable karena memerlukan paket psutil yang tidak terinstall
 
 
 class MLflowStrategy(fl.server.strategy.FedAvg):
@@ -68,21 +67,27 @@ class MLflowStrategy(fl.server.strategy.FedAvg):
         losses = []
         num_examples_list = []
 
-        for client, res in results:
-            cid = client.cid
+        for idx, (client, res) in enumerate(results):
+            cid = f"client_{idx + 1}"
             client_acc = res.metrics.get("train_accuracy")
             client_loss = res.metrics.get("local_loss")
+            client_param_norm = res.metrics.get("param_norm")
+            client_delta_norm = res.metrics.get("delta_norm")
             client_n = res.num_examples
 
             # Log metrik individual per client sebelum agregasi (pembuktian FedAvg)
             if client_acc is not None:
-                mlflow.log_metric(f"client_{cid}_train_accuracy", client_acc, step=rnd)
+                mlflow.log_metric(f"{cid}_train_accuracy", client_acc, step=rnd)
                 accs.append(client_acc)
             if client_loss is not None:
-                mlflow.log_metric(f"client_{cid}_train_loss", client_loss, step=rnd)
+                mlflow.log_metric(f"{cid}_train_loss", client_loss, step=rnd)
                 losses.append(client_loss)
+            if client_param_norm is not None:
+                mlflow.log_metric(f"{cid}_param_norm", client_param_norm, step=rnd)
+            if client_delta_norm is not None:
+                mlflow.log_metric(f"{cid}_delta_norm", client_delta_norm, step=rnd)
 
-            mlflow.log_metric(f"client_{cid}_fit_examples", client_n, step=rnd)
+            mlflow.log_metric(f"{cid}_fit_examples", client_n, step=rnd)
             num_examples_list.append(client_n)
 
         return accs, losses, num_examples_list
@@ -92,20 +97,20 @@ class MLflowStrategy(fl.server.strategy.FedAvg):
         accs = []
         num_examples_list = []
 
-        for client, res in results:
-            cid = client.cid
+        for idx, (client, res) in enumerate(results):
+            cid = f"client_{idx + 1}"
             client_acc = res.metrics.get("accuracy")
             client_loss = res.loss
             client_n = res.num_examples
 
             # Log metrik individual per client sebelum agregasi (pembuktian FedAvg)
             if client_acc is not None:
-                mlflow.log_metric(f"client_{cid}_val_accuracy", client_acc, step=rnd)
+                mlflow.log_metric(f"{cid}_val_accuracy", client_acc, step=rnd)
                 accs.append(client_acc)
             if client_loss is not None:
-                mlflow.log_metric(f"client_{cid}_val_loss", client_loss, step=rnd)
+                mlflow.log_metric(f"{cid}_val_loss", client_loss, step=rnd)
 
-            mlflow.log_metric(f"client_{cid}_val_examples", client_n, step=rnd)
+            mlflow.log_metric(f"{cid}_val_examples", client_n, step=rnd)
             num_examples_list.append(client_n)
 
         return accs, num_examples_list

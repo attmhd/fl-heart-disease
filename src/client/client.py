@@ -82,7 +82,16 @@ class HeartDiseaseClient(fl.client.NumPyClient):
         mlflow.log_metric("param_norm", param_norm, step=current_round)
         mlflow.log_metric("delta_norm", delta_norm, step=current_round)
 
-        return local_weights, len(self.X_train), {"train_accuracy": train_acc, "local_loss": train_loss}
+        return (
+            local_weights,
+            len(self.X_train),
+            {
+                "train_accuracy": train_acc,
+                "local_loss": train_loss,
+                "param_norm": float(param_norm),
+                "delta_norm": float(delta_norm),
+            },
+        )
 
     def evaluate(self, parameters, config):
         model_utils.set_model_parameters(self.learner, parameters)
