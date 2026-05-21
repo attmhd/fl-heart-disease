@@ -10,7 +10,6 @@ from utils import model_utils
 # MLflow setup
 mlflow.set_tracking_uri(config.MLFLOW_TRACKING_URI)
 mlflow.set_experiment(config.MLFLOW_EXPERIMENT_NAME)
-# mlflow.enable_system_metrics_logging() # Di-disable karena memerlukan paket psutil yang tidak terinstall
 
 
 class MLflowStrategy(fl.server.strategy.FedAvg):
@@ -62,6 +61,60 @@ class MLflowStrategy(fl.server.strategy.FedAvg):
         except Exception as e:
             print(f"Error during advanced model registry operations: {e}")
 
+    def _log_client_fit_metrics(self, rnd, results):
+        """Extract and log individual client fit metrics to MLflow before aggregation."""
+        accs = []
+        losses = []
+        num_examples_list = []
+
+        for idx, (client, res) in enumerate(results):
+            cid = f"client_{idx + 1}"
+            client_acc = res.metrics.get("train_accuracy")
+            client_loss = res.metrics.get("local_loss")
+            client_param_norm = res.metrics.get("param_norm")
+            client_delta_norm = res.metrics.get("delta_norm")
+            client_n = res.num_examples
+
+            # Log metrik individual per client sebelum agregasi (pembuktian FedAvg)
+            if client_acc is not None:
+                mlflow.log_metric(f"{cid}_train_accuracy", client_acc, step=rnd)
+                accs.append(client_acc)
+            if client_loss is not None:
+                mlflow.log_metric(f"{cid}_train_loss", client_loss, step=rnd)
+                losses.append(client_loss)
+            if client_param_norm is not None:
+                mlflow.log_metric(f"{cid}_param_norm", client_param_norm, step=rnd)
+            if client_delta_norm is not None:
+                mlflow.log_metric(f"{cid}_delta_norm", client_delta_norm, step=rnd)
+
+            mlflow.log_metric(f"{cid}_fit_examples", client_n, step=rnd)
+            num_examples_list.append(client_n)
+
+        return accs, losses, num_examples_list
+
+    def _log_client_eval_metrics(self, rnd, results):
+        """Extract and log individual client evaluation metrics to MLflow before aggregation."""
+        accs = []
+        num_examples_list = []
+
+        for idx, (client, res) in enumerate(results):
+            cid = f"client_{idx + 1}"
+            client_acc = res.metrics.get("accuracy")
+            client_loss = res.loss
+            client_n = res.num_examples
+
+            # Log metrik individual per client sebelum agregasi (pembuktian FedAvg)
+            if client_acc is not None:
+                mlflow.log_metric(f"{cid}_val_accuracy", client_acc, step=rnd)
+                accs.append(client_acc)
+            if client_loss is not None:
+                mlflow.log_metric(f"{cid}_val_loss", client_loss, step=rnd)
+
+            mlflow.log_metric(f"{cid}_val_examples", client_n, step=rnd)
+            num_examples_list.append(client_n)
+
+        return accs, num_examples_list
+
     def aggregate_fit(self, rnd, results, failures):
         # 1. Agregasi bobot dari semua client
         aggregated_result = super().aggregate_fit(rnd, results, failures)
@@ -78,20 +131,34 @@ class MLflowStrategy(fl.server.strategy.FedAvg):
             # Log jumlah client aktif pada ronde ini ke MLflow
             mlflow.log_metric("active_fit_clients", len(results), step=rnd)
 
-            accs = []
-            losses = []
-
-            for _, res in results:
-                if "train_accuracy" in res.metrics:
-                    accs.append(res.metrics["train_accuracy"])
-                if "local_loss" in res.metrics:
-                    losses.append(res.metrics["local_loss"])
+            accs, losses, num_examples_list = self._log_client_fit_metrics(rnd, results)
 
             # Log metrics ke parent run dengan menyertakan step=rnd
             if accs:
-                mlflow.log_metric("avg_train_accuracy", sum(accs) / len(accs), step=rnd)
+                # 1. Rata-rata Sederhana (Simple Average)
+                simple_avg_acc = sum(accs) / len(accs)
+                mlflow.log_metric("avg_train_accuracy", simple_avg_acc, step=rnd)
+
+                # 2. Rata-rata Tertimbang (Weighted Average / FedAvg)
+                total_examples = sum(num_examples_list)
+                if total_examples > 0:
+                    weighted_avg_acc = sum(a * n for a, n in zip(accs, num_examples_list)) / total_examples
+                else:
+                    weighted_avg_acc = simple_avg_acc
+                mlflow.log_metric("fedavg_train_accuracy", weighted_avg_acc, step=rnd)
+
             if losses:
-                mlflow.log_metric("avg_train_loss", sum(losses) / len(losses), step=rnd)
+                # 1. Rata-rata Sederhana (Simple Average)
+                simple_avg_loss = sum(losses) / len(losses)
+                mlflow.log_metric("avg_train_loss", simple_avg_loss, step=rnd)
+
+                # 2. Rata-rata Tertimbang (Weighted Average / FedAvg)
+                total_examples = sum(num_examples_list)
+                if total_examples > 0:
+                    weighted_avg_loss = sum(l * n for l, n in zip(losses, num_examples_list)) / total_examples
+                else:
+                    weighted_avg_loss = simple_avg_loss
+                mlflow.log_metric("fedavg_train_loss", weighted_avg_loss, step=rnd)
 
         return aggregated_result
 
@@ -109,14 +176,7 @@ class MLflowStrategy(fl.server.strategy.FedAvg):
             # Log jumlah client aktif pada ronde ini ke MLflow
             mlflow.log_metric("active_evaluate_clients", len(results), step=rnd)
 
-            # Ambil nilai accuracy dari tiap client untuk dihitung rata-ratanya
-            accs = []
-            num_examples_list = []
-
-            for _, res in results:
-                if "accuracy" in res.metrics:
-                    accs.append(res.metrics["accuracy"])
-                    num_examples_list.append(res.num_examples)
+            accs, num_examples_list = self._log_client_eval_metrics(rnd, results)
 
             # Log metrics global model ke parent run dengan menyertakan step=rnd
             if loss_aggregated is not None:
@@ -129,7 +189,10 @@ class MLflowStrategy(fl.server.strategy.FedAvg):
                     weighted_acc = sum(a * n for a, n in zip(accs, num_examples_list)) / total_examples
                 else:
                     weighted_acc = sum(accs) / len(accs)
+
+                # Log global_val_accuracy dan fedavg_val_accuracy secara konsisten
                 mlflow.log_metric("global_val_accuracy", weighted_acc, step=rnd)
+                mlflow.log_metric("fedavg_val_accuracy", weighted_acc, step=rnd)
 
                 # Cek dan simpan model terbaik berdasarkan akurasi tertinggi
                 if weighted_acc > self.best_accuracy:
