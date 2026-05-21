@@ -6,14 +6,17 @@ def get_model_parameters(model):
         return [model.coef_, model.intercept_]
     return [model.coef_]
 
+
 def set_model_parameters(model, parameters):
     model.coef_ = parameters[0]
     if getattr(model, "fit_intercept", True):
         model.intercept_ = parameters[1]
     return model
 
+
 def flatten_parameters(parameters):
     return np.concatenate([p.flatten() for p in parameters])
+
 
 def set_initial_params(model, X_train, y_train):
     unique_classes = np.unique(y_train)

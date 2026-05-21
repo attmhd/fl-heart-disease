@@ -9,6 +9,12 @@ services:
     command: mlflow server --host 0.0.0.0 --port 5000 --backend-store-uri sqlite:///mlflow.db --default-artifact-root /mlruns --allowed-hosts "*"
     environment:
       - MLFLOW_SERVER_ALLOWED_HOSTS="*"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s = socket.socket(); s.connect(('127.0.0.1', 5000))"]
+      interval: 3s
+      timeout: 3s
+      retries: 15
+      start_period: 5s
     restart: on-failure
 
   fl_server:
@@ -17,13 +23,20 @@ services:
       dockerfile: Dockerfile.server
     container_name: fl_server
     depends_on:
-      - mlflow_server
+      mlflow_server:
+        condition: service_healthy
     volumes:
       - ./mlruns:/mlruns
     environment:
       - MLFLOW_TRACKING_URI=http://mlflow_server:5000
     ports:
       - "8080:8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s = socket.socket(); s.connect(('127.0.0.1', 8080))"]
+      interval: 3s
+      timeout: 3s
+      retries: 15
+      start_period: 5s
     restart: on-failure
 
   client_1:
@@ -32,9 +45,10 @@ services:
       dockerfile: Dockerfile.client
     container_name: client_1
     depends_on:
-      - fl_server
+      fl_server:
+        condition: service_healthy
     volumes:
-      - ./dataset:/app/dataset
+      - ./data:/app/data
     environment:
       - SERVER_ADDRESS=fl_server:8080
       - DATASET_PATH=/app/data/processed/heart_disease_hungary_cleaned.csv
@@ -49,9 +63,10 @@ services:
       dockerfile: Dockerfile.client
     container_name: client_2
     depends_on:
-      - fl_server
+      fl_server:
+        condition: service_healthy
     volumes:
-      - ./dataset:/app/dataset
+      - ./data:/app/data
     environment:
       - SERVER_ADDRESS=fl_server:8080
       - DATASET_PATH=/app/data/processed/heart_disease_switzerland_cleaned.csv
@@ -59,3 +74,45 @@ services:
       - MLFLOW_TRACKING_URI=http://mlflow_server:5000
     command: python -m src.client.client
     restart: on-failure
+
+  loki:
+    image: grafana/loki:latest
+    container_name: loki
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./monitoring/loki/loki-config.yaml:/etc/loki/local-config.yaml:ro
+      - loki_data:/loki
+    command: -config.file=/etc/loki/local-config.yaml
+    restart: on-failure
+
+  promtail:
+    image: grafana/promtail:latest
+    container_name: promtail
+    volumes:
+      - ./monitoring/promtail/promtail-config.yaml:/etc/promtail/config.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    command: -config.file=/etc/promtail/config.yml
+    restart: on-failure
+    depends_on:
+      - loki
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/etc/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    restart: on-failure
+    depends_on:
+      - loki
+
+volumes:
+  loki_data:
+  grafana_data:

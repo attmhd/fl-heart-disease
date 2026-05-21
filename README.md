@@ -77,6 +77,19 @@ export PYTHONPATH=$PYTHONPATH:$(pwd)/src
 python -m client.client
 ```
 
+### 3. Monitoring & Analisis Log (Grafana Loki Stack)
+
+Proyek ini dilengkapi dengan stack monitoring real-time untuk memantau log, error, dan metrik dari seluruh container Docker (`fl_server`, `client_1`, `client_2`, `mlflow_server`):
+
+- **Grafana Dashboard**: Buka [http://localhost:3000](http://localhost:3000)
+  - **Kredensial**: Username `admin` / Password `admin`
+  - **Dashboard Bawaan**: Buka menu **Dashboards** -> folder **Monitoring** -> pilih dashboard **Docker Container Logs**
+  - **Fitur Utama**:
+    - Dropdown filter interaktif untuk memilih container.
+    - Pencarian teks (live filtering) di seluruh log container.
+    - Statistik error, warning, dan volume log secara real-time.
+    - Tampilan stream log interaktif dengan highlighting level log (info/warning/error).
+
 ## 👤 Author
 
 - **Muhammad Attan** - [2022610013.attan@itp.ac.id](mailto:2022610013.attan@itp.ac.id)
