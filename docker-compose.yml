@@ -85,14 +85,14 @@ services:
       - loki_data:/loki
     command: -config.file=/etc/loki/local-config.yaml
     restart: on-failure
-
-  promtail:
-    image: grafana/promtail:latest
-    container_name: promtail
+  alloy:
+    image: grafana/alloy:latest
+    container_name: alloy
+    user: root
     volumes:
-      - ./monitoring/promtail/promtail-config.yaml:/etc/promtail/config.yml:ro
+      - ./monitoring/alloy/config.alloy:/etc/alloy/config.alloy:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
-    command: -config.file=/etc/promtail/config.yml
+    command: run --storage.path=/var/lib/alloy/data /etc/alloy/config.alloy
     restart: on-failure
     depends_on:
       - loki
