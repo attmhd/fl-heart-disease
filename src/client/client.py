@@ -71,12 +71,35 @@ class HeartDiseaseClient(fl.client.NumPyClient):
         else:
             current_round = 0
 
+        # Dinamis start child run menggunakan server_run_id dari server jika belum aktif
+        parent_run_id = config.get("server_run_id")
+        if mlflow.active_run() is None and parent_run_id:
+            run_name = f"Federated_Client_{self.client_id}_Logistic_Regression_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            tags = {"mlflow.parentRunId": parent_run_id}
+            mlflow.start_run(run_name=run_name, tags=tags)
+
+            # Set tags for user/handled_by/project
+            mlflow.set_tag("mlflow.user", self.client_id)
+            mlflow.set_tag("handled_by", f"User {self.client_id}")
+            mlflow.set_tag("project", "Federated Heart Disease")
+            mlflow.set_tag("mlflow.note.content", f"Partisipasi client {self.client_id} dalam pelatihan Federated Learning untuk deteksi penyakit jantung.")
+
         # Log parameters sekali saja di ronde pertama
         if current_round <= 1:
             stats = data_utils.get_client_stats(self.y_train)
-            mlflow.log_params({"client_id": self.client_id, "num_samples": stats["num_samples"], "class_0": stats["class_0"], "class_1": stats["class_1"]})
+            model_params = self.learner.get_params()
+            log_dict = {
+                "client_id": self.client_id,
+                "num_samples": stats["num_samples"],
+                "class_0": stats["class_0"],
+                "class_1": stats["class_1"],
+            }
+            # Log parameter model dengan prefix model_
+            for k, v in model_params.items():
+                log_dict[f"model_{k}"] = str(v)
+            mlflow.log_params(log_dict)
 
-        # Log metrics langsung ke parent run dengan step=current_round
+        # Log metrics langsung ke child run dengan step=current_round
         mlflow.log_metric("train_accuracy", train_acc, step=current_round)
         mlflow.log_metric("train_loss", train_loss, step=current_round)
         mlflow.log_metric("param_norm", param_norm, step=current_round)
@@ -110,17 +133,9 @@ def start_client():
 
     client = HeartDiseaseClient(X_train, y_train, X_test, y_test, config.CLIENT_ID)
 
-    run_name = f"Federated_Client_{config.CLIENT_ID}_Logistic_Regression_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    import time
 
-    # Mulai Parent Run untuk sesi client ini
-    with mlflow.start_run(run_name=run_name):
-        mlflow.set_tag("mlflow.user", config.CLIENT_ID)
-        mlflow.set_tag("handled_by", f"User {config.CLIENT_ID}")
-        mlflow.set_tag("project", "Federated Heart Disease")
-        mlflow.set_tag("mlflow.note.content", f"Partisipasi client {config.CLIENT_ID} dalam pelatihan Federated Learning untuk deteksi penyakit jantung.")
-
-        import time
-
+    try:
         max_retries = 10
         for attempt in range(max_retries):
             try:
@@ -134,6 +149,10 @@ def start_client():
                 else:
                     print(f"[{config.CLIENT_ID}] Could not connect to Flower Server. Max retries reached.")
                     raise e
+    finally:
+        if mlflow.active_run() is not None:
+            print(f"[{config.CLIENT_ID}] Ending active MLflow child run...")
+            mlflow.end_run()
 
 
 if __name__ == "__main__":

@@ -230,7 +230,8 @@ class MLflowStrategy(fl.server.strategy.FedAvg):
 def start_server():
     run_name = f"Federated_Server_Logistic_Regression_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
-    with mlflow.start_run(run_name=run_name):
+    with mlflow.start_run(run_name=run_name) as run:
+        server_run_id = run.info.run_id
         mlflow.set_tag("mlflow.user", "server")
         mlflow.set_tag("handled_by", "Admin Server")
         mlflow.set_tag("project", "Federated Heart Disease")
@@ -239,7 +240,12 @@ def start_server():
         # Log server configurations
         mlflow.log_params({"num_rounds": config.FL_NUM_ROUNDS, "strategy": "FedAvg"})
 
-        strategy = MLflowStrategy(on_fit_config_fn=config.fit_config)
+        def fit_config_with_run_id(server_round: int):
+            config_dict = config.fit_config(server_round)
+            config_dict["server_run_id"] = server_run_id
+            return config_dict
+
+        strategy = MLflowStrategy(on_fit_config_fn=fit_config_with_run_id)
 
         fl.server.start_server(server_address=config.FL_SERVER_ADDRESS, config=fl.server.ServerConfig(num_rounds=config.FL_NUM_ROUNDS), strategy=strategy)
 

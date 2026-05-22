@@ -18,6 +18,7 @@ dependencies = [
 dev = [
     "black>=25.12.0",
     "pre-commit>=4.6.0",
+    "pytest>=9.0.3",
     "ruff>=0.15.13",
 ]
 
@@ -43,6 +44,9 @@ exclude = [
 select = ["E", "F", "W", "I", "UP"]
 extend-select = ["PLR", "PLW"]
 ignore = ["E741"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["PLR2004"]
 
 [tool.black]
 line-length = 250
