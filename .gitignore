@@ -17,3 +17,5 @@ mlflow.db
 .ruff_cache/
 
 .agents/
+
+.pytest_cache/

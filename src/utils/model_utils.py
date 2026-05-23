@@ -11,6 +11,7 @@ def set_model_parameters(model, parameters):
     model.coef_ = parameters[0]
     if getattr(model, "fit_intercept", True):
         model.intercept_ = parameters[1]
+    model.classes_ = np.array([0, 1])
     return model
 
 
