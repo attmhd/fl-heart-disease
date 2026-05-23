@@ -14,8 +14,12 @@ COPY src/__init__.py ./src/
 COPY src/configs/ ./src/configs/
 COPY src/data/ ./src/data/
 COPY src/models/ ./src/models/
-COPY src/utils/ ./src/utils/
 COPY src/server/ ./src/server/
+COPY src/utils/__init__.py ./src/utils/
+COPY src/utils/data_utils.py ./src/utils/
+COPY src/utils/eval_utils.py ./src/utils/
+COPY src/utils/model_utils.py ./src/utils/
+COPY src/utils/server_utils.py ./src/utils/
 
 # Expose FL Server port
 EXPOSE 8080

@@ -42,11 +42,13 @@ exclude = [
     "notebook",
     "data",
 ]
+fixable = ["ALL"]
+
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP"]
 extend-select = ["PLR", "PLW"]
-ignore = ["E741"]
+
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["PLR2004"]

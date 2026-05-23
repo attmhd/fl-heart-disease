@@ -13,8 +13,12 @@ RUN uv pip install --system --no-cache-dir -r pyproject.toml
 COPY src/__init__.py ./src/
 COPY src/configs/ ./src/configs/
 COPY src/models/ ./src/models/
-COPY src/utils/ ./src/utils/
 COPY src/data/ ./src/data/
 COPY src/client/ ./src/client/
+COPY src/utils/__init__.py ./src/utils/
+COPY src/utils/data_utils.py ./src/utils/
+COPY src/utils/eval_utils.py ./src/utils/
+COPY src/utils/model_utils.py ./src/utils/
+COPY src/utils/client_utils.py ./src/utils/
 
 CMD ["python", "-m", "src.client.client"]
