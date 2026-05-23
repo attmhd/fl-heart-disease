@@ -13,7 +13,7 @@ from sklearn.metrics import accuracy_score, log_loss
 from configs import config
 from data import dataset
 from models import model
-from utils import data_utils, model_utils
+from utils import data_utils, eval_utils, model_utils
 
 # MLflow setup
 mlflow.set_tracking_uri(config.MLFLOW_TRACKING_URI)
@@ -76,13 +76,16 @@ class HeartDiseaseClient(fl.client.NumPyClient):
         if mlflow.active_run() is None and parent_run_id:
             run_name = f"Federated_Client_{self.client_id}_Logistic_Regression_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
             tags = {"mlflow.parentRunId": parent_run_id}
-            mlflow.start_run(run_name=run_name, tags=tags)
+            run = mlflow.start_run(run_name=run_name, tags=tags)
+            self.mlflow_run_id = run.info.run_id
 
             # Set tags for user/handled_by/project
             mlflow.set_tag("mlflow.user", self.client_id)
             mlflow.set_tag("handled_by", f"User {self.client_id}")
             mlflow.set_tag("project", "Federated Heart Disease")
             mlflow.set_tag("mlflow.note.content", f"Partisipasi client {self.client_id} dalam pelatihan Federated Learning untuk deteksi penyakit jantung.")
+        elif mlflow.active_run() is not None:
+            self.mlflow_run_id = mlflow.active_run().info.run_id
 
         # Log parameters sekali saja di ronde pertama
         if current_round <= 1:
@@ -124,6 +127,51 @@ class HeartDiseaseClient(fl.client.NumPyClient):
 
         loss = log_loss(self.y_test, probs, labels=[0, 1])
         acc = accuracy_score(self.y_test, preds)
+
+        # Check if it is the final round for client-side distributed evaluation
+        is_final_round = config.get("is_final_round", False)
+        if isinstance(is_final_round, str):
+            is_final_round = is_final_round.lower() == "true"
+
+        if is_final_round:
+            print(f"[{self.client_id}] Starting final evaluation on local dataset...")
+            # Resubscribe/activate child run on this specific thread if it is not already active
+            client_run = None
+            if mlflow.active_run() is None:
+                saved_run_id = getattr(self, "mlflow_run_id", None)
+                if saved_run_id:
+                    client_run = mlflow.start_run(run_id=saved_run_id)
+                else:
+                    # Fallback to create client run if it was never created in fit()
+                    parent_run_id = config.get("server_run_id")
+                    if parent_run_id:
+                        run_name = f"Federated_Client_{self.client_id}_Logistic_Regression_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                        tags = {"mlflow.parentRunId": parent_run_id}
+                        client_run = mlflow.start_run(run_name=run_name, tags=tags)
+
+                        mlflow.set_tag("mlflow.user", self.client_id)
+                        mlflow.set_tag("handled_by", f"User {self.client_id}")
+                        mlflow.set_tag("project", "Federated Heart Disease")
+                        mlflow.set_tag(
+                            "mlflow.note.content",
+                            f"Partisipasi client {self.client_id} dalam pelatihan Federated Learning untuk deteksi penyakit jantung.",
+                        )
+
+            try:
+                # Evaluate and log detailed metrics and plots using centralized eval_utils helper
+                eval_utils.evaluate_and_log_metrics(
+                    model_obj=self.learner,
+                    X_test=self.X_test,
+                    y_test=self.y_test,
+                    artifact_path="best_model_client_evaluation",
+                    metrics_prefix="best_model_client",
+                    title_suffix=f"- {self.client_id} (Best Model)",
+                )
+            finally:
+                if client_run is not None:
+                    mlflow.end_run()
+
+            print(f"[{self.client_id}] Best Model Final Evaluation Completed: Loss = {loss:.4f}, Accuracy = {acc:.4f}")
 
         return loss, len(self.X_test), {"accuracy": acc}
 

@@ -8,6 +8,7 @@ MLFLOW_MODEL_NAME = "Heart_Disease_Global_Model"
 # Flower Server Configuration
 FL_SERVER_ADDRESS = "0.0.0.0:8080"
 FL_NUM_ROUNDS = 10
+SERVER_DATASET_PATH = os.environ.get("SERVER_DATASET_PATH", "data/processed/heart_disease_hungary_cleaned.csv")
 
 # Flower Client Configuration
 FL_CLIENT_SERVER_ADDRESS = os.environ.get("SERVER_ADDRESS", "fl_server:8080")

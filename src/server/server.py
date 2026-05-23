@@ -1,11 +1,13 @@
+import os
 from datetime import datetime
 
 import flwr as fl
 import mlflow
 
 from configs import config
+from data import dataset
 from models import model
-from utils import model_utils
+from utils import eval_utils, model_utils
 
 # MLflow setup
 mlflow.set_tracking_uri(config.MLFLOW_TRACKING_URI)
@@ -20,6 +22,32 @@ class MLflowStrategy(fl.server.strategy.FedAvg):
         self.best_round = None
         self.current_weights = None
         self.participant_clients = set()
+
+    def configure_evaluate(self, server_round: int, parameters: fl.common.Parameters, client_manager: fl.server.client_manager.ClientManager):
+        # Jika ronde terakhir dan kita memiliki best_weights, distribusikan best_weights!
+        if server_round == config.FL_NUM_ROUNDS and self.best_weights is not None:
+            print(f"[SERVER] Distributing the BEST global model weights from Round {self.best_round} (Accuracy: {self.best_accuracy:.4f}) for final client-side evaluation.")
+            parameters_to_distribute = self.best_weights
+        else:
+            parameters_to_distribute = parameters
+
+        return super().configure_evaluate(server_round, parameters_to_distribute, client_manager)
+
+    def evaluate(self, server_round: int, parameters: fl.common.Parameters):
+        # 1. Jalankan evaluasi sentral menggunakan super class (memanggil evaluate_fn pada server)
+        eval_res = super().evaluate(server_round, parameters)
+
+        if eval_res is not None:
+            loss, metrics = eval_res
+            centralized_acc = metrics.get("accuracy")
+            if centralized_acc is not None:
+                # Cek dan simpan model terbaik berdasarkan akurasi sentral tertinggi
+                if centralized_acc > self.best_accuracy:
+                    self.best_accuracy = centralized_acc
+                    self.best_weights = parameters
+                    self.best_round = server_round
+                    print(f"[SERVER - CENTRALIZED] New best global model achieved at Round {server_round}! Centralized Accuracy: {centralized_acc:.4f}")
+        return eval_res
 
     def _register_best_model(self, model_name):
         """Register, tag, and promote the best model to Production stage in MLflow Model Registry."""
@@ -194,12 +222,12 @@ class MLflowStrategy(fl.server.strategy.FedAvg):
                 mlflow.log_metric("global_val_accuracy", weighted_acc, step=rnd)
                 mlflow.log_metric("fedavg_val_accuracy", weighted_acc, step=rnd)
 
-                # Cek dan simpan model terbaik berdasarkan akurasi tertinggi
-                if weighted_acc > self.best_accuracy:
+                # Cek dan simpan model terbaik berdasarkan akurasi tertinggi jika centralized tidak aktif
+                if not self.evaluate_fn and weighted_acc > self.best_accuracy:
                     self.best_accuracy = weighted_acc
                     self.best_weights = self.current_weights
                     self.best_round = rnd
-                    print(f"[ROUND {rnd}] New best global model achieved! Accuracy: {weighted_acc:.4f}")
+                    print(f"[ROUND {rnd}] New best global model achieved from client validation! Accuracy: {weighted_acc:.4f}")
 
             # Hanya log model terbaik & daftarkan ke Model Registry di ronde terakhir
             if rnd == config.FL_NUM_ROUNDS:
@@ -216,6 +244,22 @@ class MLflowStrategy(fl.server.strategy.FedAvg):
                     print(f"Logging the best global model from Round {self.best_round} (Accuracy: {self.best_accuracy:.4f}) to MLflow Model Registry...")
                     mlflow.sklearn.log_model(sk_model=lr_model, artifact_path="model", registered_model_name=model_name)
 
+                    # Jalankan evaluasi sentral khusus untuk BEST model pada server
+                    if os.path.exists(config.SERVER_DATASET_PATH):
+                        try:
+                            _, X_test_c, _, y_test_c = dataset.load_data(config.SERVER_DATASET_PATH)
+                            best_loss, best_acc = eval_utils.evaluate_and_log_metrics(
+                                model_obj=lr_model,
+                                X_test=X_test_c,
+                                y_test=y_test_c,
+                                artifact_path="best_model_centralized_evaluation",
+                                metrics_prefix="best_model_centralized",
+                                title_suffix="- Best Global Model (Centralized)",
+                            )
+                            print(f"[SERVER - BEST MODEL] Centralized evaluation of the BEST model completed: Loss = {best_loss:.4f}, Accuracy = {best_acc:.4f}")
+                        except Exception as e:
+                            print(f"[SERVER - BEST MODEL] Failed to run centralized evaluation on the best model: {e}")
+
                     # Daftarkan parameter model terbaik ke MLflow parent run
                     mlflow.log_params({"best_model_round": self.best_round, "best_model_val_accuracy": self.best_accuracy, "total_participating_clients": len(self.participant_clients)})
 
@@ -225,6 +269,45 @@ class MLflowStrategy(fl.server.strategy.FedAvg):
                     print("Warning: No weights found to reconstruct global model for MLflow logging.")
 
         return aggregated_result
+
+
+def get_evaluate_fn(test_dataset_path, server_run_id):
+    """Return an evaluation function for centralized evaluation on the server."""
+    # Load dataset once
+    _, X_test, _, y_test = dataset.load_data(test_dataset_path)
+
+    def evaluate(
+        server_round: int,
+        parameters: fl.common.NDArrays,
+        config_dict: dict,
+    ):
+        # Reconstruct the model from parameters
+        lr_model = model.get_lr_model()
+        model_utils.set_model_parameters(lr_model, parameters)
+
+        # Ensure active MLflow run is active on this thread context
+        server_run = None
+        if mlflow.active_run() is None:
+            server_run = mlflow.start_run(run_id=server_run_id)
+
+        try:
+            loss, acc = eval_utils.evaluate_and_log_metrics(
+                model_obj=lr_model,
+                X_test=X_test,
+                y_test=y_test,
+                artifact_path=None,
+                metrics_prefix="centralized",
+                step=server_round,
+                title_suffix=f"- Server Round {server_round}",
+            )
+        finally:
+            if server_run is not None:
+                mlflow.end_run()
+
+        print(f"[SERVER] Centralized Evaluation for Round {server_round}: Loss = {loss:.4f}, Accuracy = {acc:.4f}")
+        return loss, {"accuracy": acc}
+
+    return evaluate
 
 
 def start_server():
@@ -245,7 +328,29 @@ def start_server():
             config_dict["server_run_id"] = server_run_id
             return config_dict
 
-        strategy = MLflowStrategy(on_fit_config_fn=fit_config_with_run_id)
+        def evaluate_config(server_round: int):
+            return {
+                "server_round": server_round,
+                "is_final_round": server_round == config.FL_NUM_ROUNDS,
+                "server_run_id": server_run_id,
+            }
+
+        # Initialize the evaluate function if dataset path exists
+        evaluate_fn = None
+        if os.path.exists(config.SERVER_DATASET_PATH):
+            try:
+                evaluate_fn = get_evaluate_fn(config.SERVER_DATASET_PATH, server_run_id)
+                print(f"[SERVER] Centralized evaluation enabled using dataset: {config.SERVER_DATASET_PATH}")
+            except Exception as e:
+                print(f"[SERVER] Failed to load centralized dataset for evaluation: {e}")
+        else:
+            print(f"[SERVER] Centralized evaluation dataset not found at: {config.SERVER_DATASET_PATH}")
+
+        strategy = MLflowStrategy(
+            on_fit_config_fn=fit_config_with_run_id,
+            on_evaluate_config_fn=evaluate_config,
+            evaluate_fn=evaluate_fn,
+        )
 
         fl.server.start_server(server_address=config.FL_SERVER_ADDRESS, config=fl.server.ServerConfig(num_rounds=config.FL_NUM_ROUNDS), strategy=strategy)
 
