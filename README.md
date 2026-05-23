@@ -33,10 +33,10 @@ graph TB
     end
 
     subgraph MonitoringLayer ["📊 Centralized Observability Stack"]
-        PT["🕷️ Promtail Log Shipper"]
+        AY["⚙️ Grafana Alloy Agent"]
         LK[("🪵 Grafana Loki (Log DB)")]
         GF["📈 Grafana UI Dashboard (Port 3000)"]
-        PT --> LK
+        AY --> LK
         LK --> GF
     end
 
@@ -55,8 +55,8 @@ graph TB
     FS -. "Streams Stdout/Stderr" .-> DS
     MLF -. "Streams Stdout/Stderr" .-> DS
 
-    DS ==>|"Read & Relabel Logs"| PT
-    PT ==>|"Push Structured Logs (Port 3100)"| LK
+    DS ==>|"Read & Relabel Logs"| AY
+    AY ==>|"Push Structured Logs (Port 3100)"| LK
 
     %% Styling
     classDef client fill:#e1f5fe,stroke:#039be5,stroke-width:2px;
@@ -68,7 +68,7 @@ graph TB
     class C1,C2 client;
     class FS,FA server;
     class MLF tracking;
-    class PT,GF monitor;
+    class AY,GF monitor;
     class D1,D2,MR,LK,DS storage;
 ```
 
@@ -89,7 +89,7 @@ graph TB
 * **Best Model Registry**: Hanya model global terbaik (berdasarkan akurasi validasi teragregasi tertinggi lintas seluruh ronde) yang didaftarkan ke *Model Registry*, menghindari sampah versi model per ronde.
 * **Production Promotion**: Model terbaik secara otomatis ditransisikan ke tahap `"Production"`, diberikan metadata tags lengkap (`validation_accuracy`, `best_round`, `algorithm`, `total_participating_clients`), serta ditautkan ke alias `"champion"` dan `"Production"` menggunakan `MlflowClient`. Versi model lama diarsipkan secara otomatis.
 
-### 4. Observabilitas Tersentralisasi (Grafana Loki & Promtail Stack)
+### 4. Observabilitas Tersentralisasi (Grafana Loki & Grafana Alloy)
 * Pengumpulan log aktif dan otomatis dari seluruh container (`fl_server`, `client_1`, `client_2`, `mlflow`) dengan menghubungkan soket Docker `/var/run/docker.sock`.
 * Dashboard **Docker Container Logs** siap pakai di Grafana (Port 3000) untuk mempermudah pencarian log, visualisasi volume log, filter container, dan monitoring *error* / *warning* secara real-time.
 
@@ -103,7 +103,7 @@ graph TB
 | **Loki** | `3100` | `3100` | HTTP | Basis data log tersentralisasi |
 | **MLflow Server** | `5000` | `5000` | HTTP | Experiment Tracking & Model Registry |
 | **FL Server (Flower)** | `8080` | `8080` | TCP (gRPC) | Server Pembelajaran Terfederasi |
-| **Promtail** | *N/A* | `9080` | HTTP | Pengumpul log container Docker |
+| **Grafana Alloy** | *N/A* | *Internal* | HTTP | Agen pengumpul log kontainer modern |
 
 ---
 
@@ -120,7 +120,7 @@ graph TB
 │   ├── server/         # Implementasi Flower Server, FedAvg & Registry Automation
 │   ├── models/         # Arsitektur model (Scikit-learn Logistic Regression)
 │   └── utils/          # Fungsi pembantu (data loading, preprocessing)
-├── monitoring/         # Konfigurasi Grafana Loki & Promtail
+├── monitoring/         # Konfigurasi Grafana Loki, Alloy, & Grafana
 │   ├── grafana/        # Dashboards & Datasources provisioning
 │   └── loki/           # Konfigurasi database Loki
 ├── Dockerfile.client   # Dockerfile teroptimasi (slim size dengan Astral UV)

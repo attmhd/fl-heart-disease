@@ -5,6 +5,7 @@ from datetime import datetime
 # Ensure src directory is at the front of sys.path to avoid collision with root-level 'data' volume mount
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+os.environ["GIT_PYTHON_REFRESH"] = "quiet"
 import flwr as fl
 import mlflow
 import numpy as np
@@ -176,19 +177,40 @@ class HeartDiseaseClient(fl.client.NumPyClient):
         return loss, len(self.X_test), {"accuracy": acc}
 
 
-def start_client():
+def client_fn(context: fl.common.Context) -> fl.client.Client:
+    """ClientApp factory function — called by flower-superexec / flower-supernode."""
     X_train, X_test, y_train, y_test = dataset.load_data(config.CLIENT_DATASET_PATH)
+    return HeartDiseaseClient(X_train, y_train, X_test, y_test, config.CLIENT_ID).to_client()
 
+
+# Module-level ClientApp — loaded by flower-superexec (plugin-type=clientapp)
+app = fl.client.ClientApp(client_fn=client_fn)
+
+
+def start_client():
+    """Legacy entry point — starts client directly via Python (for backward compatibility).
+
+    Kept for local/Docker Compose runs where flower-supernode is not separately deployed.
+    """
+    X_train, X_test, y_train, y_test = dataset.load_data(config.CLIENT_DATASET_PATH)
     client = HeartDiseaseClient(X_train, y_train, X_test, y_test, config.CLIENT_ID)
 
     import time
+
+    # Use the internal (non-deprecated) gRPC bidi client start function
+    from flwr.compat.client.app import start_client_internal
 
     try:
         max_retries = 10
         for attempt in range(max_retries):
             try:
                 print(f"[{config.CLIENT_ID}] Connecting to Flower Server at {config.FL_CLIENT_SERVER_ADDRESS} (Attempt {attempt+1}/{max_retries})...")
-                fl.client.start_client(server_address=config.FL_CLIENT_SERVER_ADDRESS, client=client.to_client())
+                start_client_internal(
+                    server_address=config.FL_CLIENT_SERVER_ADDRESS,
+                    node_config={},
+                    client=client.to_client(),
+                    insecure=True,
+                )
                 break
             except Exception as e:
                 if attempt < max_retries - 1:

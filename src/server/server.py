@@ -1,4 +1,6 @@
 import os
+
+os.environ["GIT_PYTHON_REFRESH"] = "quiet"
 from datetime import datetime
 
 import flwr as fl
@@ -242,7 +244,7 @@ class MLflowStrategy(fl.server.strategy.FedAvg):
                     # Log model terbaik ke MLflow dan daftarkan ke Model Registry
                     model_name = config.MLFLOW_MODEL_NAME
                     print(f"Logging the best global model from Round {self.best_round} (Accuracy: {self.best_accuracy:.4f}) to MLflow Model Registry...")
-                    mlflow.sklearn.log_model(sk_model=lr_model, artifact_path="model", registered_model_name=model_name)
+                    mlflow.sklearn.log_model(sk_model=lr_model, name="model", registered_model_name=model_name)
 
                     # Jalankan evaluasi sentral khusus untuk BEST model pada server
                     if os.path.exists(config.SERVER_DATASET_PATH):
@@ -310,7 +312,75 @@ def get_evaluate_fn(test_dataset_path, server_run_id):
     return evaluate
 
 
+def _build_strategy_with_mlflow(server_run_id: str):
+    """Build the MLflowStrategy and config functions for a given MLflow run."""
+
+    def fit_config_with_run_id(server_round: int):
+        config_dict = config.fit_config(server_round)
+        config_dict["server_run_id"] = server_run_id
+        return config_dict
+
+    def evaluate_config(server_round: int):
+        return {
+            "server_round": server_round,
+            "is_final_round": server_round == config.FL_NUM_ROUNDS,
+            "server_run_id": server_run_id,
+        }
+
+    # Initialize the evaluate function if dataset path exists
+    evaluate_fn = None
+    if os.path.exists(config.SERVER_DATASET_PATH):
+        try:
+            evaluate_fn = get_evaluate_fn(config.SERVER_DATASET_PATH, server_run_id)
+            print(f"[SERVER] Centralized evaluation enabled using dataset: {config.SERVER_DATASET_PATH}")
+        except Exception as e:
+            print(f"[SERVER] Failed to load centralized dataset for evaluation: {e}")
+    else:
+        print(f"[SERVER] Centralized evaluation dataset not found at: {config.SERVER_DATASET_PATH}")
+
+    strategy = MLflowStrategy(
+        on_fit_config_fn=fit_config_with_run_id,
+        on_evaluate_config_fn=evaluate_config,
+        evaluate_fn=evaluate_fn,
+    )
+    return strategy
+
+
+def server_fn(context: fl.common.Context) -> fl.server.ServerAppComponents:
+    """ServerApp factory function — called by flower-superexec / flower-superlink.
+
+    MLflow parent run is started here so it wraps the full training session.
+    """
+    run_name = f"Federated_Server_Logistic_Regression_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
+    active = mlflow.active_run()
+    run = active if active else mlflow.start_run(run_name=run_name)
+    server_run_id = run.info.run_id
+
+    mlflow.set_tag("mlflow.user", "server")
+    mlflow.set_tag("handled_by", "Admin Server")
+    mlflow.set_tag("project", "Federated Heart Disease")
+    mlflow.set_tag(
+        "mlflow.note.content",
+        "Eksperimen FL Murni: Server tidak memiliki akses ke dataset. Evaluasi hanya berdasarkan laporan metrik dari client.",
+    )
+    mlflow.log_params({"num_rounds": config.FL_NUM_ROUNDS, "strategy": "FedAvg"})
+
+    strategy = _build_strategy_with_mlflow(server_run_id)
+    server_config = fl.server.ServerConfig(num_rounds=config.FL_NUM_ROUNDS)
+    return fl.server.ServerAppComponents(strategy=strategy, config=server_config)
+
+
+# Module-level ServerApp — loaded by flower-superexec (plugin-type=serverapp)
+app = fl.server.ServerApp(server_fn=server_fn)
+
+
 def start_server():
+    """Legacy entry point — starts server directly via Python (for backward compatibility).
+
+    Wraps the MLflow parent run and launches the gRPC infrastructure inline.
+    Kept for local/Docker Compose runs where flower-superlink is not separately deployed.
+    """
     run_name = f"Federated_Server_Logistic_Regression_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
     with mlflow.start_run(run_name=run_name) as run:
@@ -318,41 +388,35 @@ def start_server():
         mlflow.set_tag("mlflow.user", "server")
         mlflow.set_tag("handled_by", "Admin Server")
         mlflow.set_tag("project", "Federated Heart Disease")
-        mlflow.set_tag("mlflow.note.content", "Eksperimen FL Murni: Server tidak memiliki akses ke dataset. Evaluasi hanya berdasarkan laporan metrik dari client.")
-
-        # Log server configurations
+        mlflow.set_tag(
+            "mlflow.note.content",
+            "Eksperimen FL Murni: Server tidak memiliki akses ke dataset. Evaluasi hanya berdasarkan laporan metrik dari client.",
+        )
         mlflow.log_params({"num_rounds": config.FL_NUM_ROUNDS, "strategy": "FedAvg"})
 
-        def fit_config_with_run_id(server_round: int):
-            config_dict = config.fit_config(server_round)
-            config_dict["server_run_id"] = server_run_id
-            return config_dict
+        strategy = _build_strategy_with_mlflow(server_run_id)
 
-        def evaluate_config(server_round: int):
-            return {
-                "server_round": server_round,
-                "is_final_round": server_round == config.FL_NUM_ROUNDS,
-                "server_run_id": server_run_id,
-            }
+        # Use the new non-deprecated gRPC server path directly
+        from flwr.server.compat.app import init_defaults, run_fl
+        from flwr.server.superlink.fleet.grpc_bidi.grpc_server import start_grpc_server
 
-        # Initialize the evaluate function if dataset path exists
-        evaluate_fn = None
-        if os.path.exists(config.SERVER_DATASET_PATH):
-            try:
-                evaluate_fn = get_evaluate_fn(config.SERVER_DATASET_PATH, server_run_id)
-                print(f"[SERVER] Centralized evaluation enabled using dataset: {config.SERVER_DATASET_PATH}")
-            except Exception as e:
-                print(f"[SERVER] Failed to load centralized dataset for evaluation: {e}")
-        else:
-            print(f"[SERVER] Centralized evaluation dataset not found at: {config.SERVER_DATASET_PATH}")
-
-        strategy = MLflowStrategy(
-            on_fit_config_fn=fit_config_with_run_id,
-            on_evaluate_config_fn=evaluate_config,
-            evaluate_fn=evaluate_fn,
+        initialized_server, initialized_config = init_defaults(
+            server=None,
+            config=fl.server.ServerConfig(num_rounds=config.FL_NUM_ROUNDS),
+            strategy=strategy,
+            client_manager=None,
         )
 
-        fl.server.start_server(server_address=config.FL_SERVER_ADDRESS, config=fl.server.ServerConfig(num_rounds=config.FL_NUM_ROUNDS), strategy=strategy)
+        print(f"[SERVER] Starting gRPC server on {config.FL_SERVER_ADDRESS}")
+        grpc_server = start_grpc_server(
+            client_manager=initialized_server.client_manager(),
+            server_address=config.FL_SERVER_ADDRESS,
+        )
+
+        try:
+            run_fl(server=initialized_server, config=initialized_config)
+        finally:
+            grpc_server.stop(grace=1)
 
 
 if __name__ == "__main__":

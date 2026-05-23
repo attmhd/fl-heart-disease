@@ -19,3 +19,5 @@ mlflow.db
 .agents/
 
 .pytest_cache/
+
+docs/
