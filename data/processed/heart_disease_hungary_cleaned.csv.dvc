@@ -1,0 +1,5 @@
+outs:
+- md5: 73ad9b04b6d95b3d4da9aa61b038db94
+  size: 27822
+  hash: md5
+  path: heart_disease_hungary_cleaned.csv
