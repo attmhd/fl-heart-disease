@@ -1,6 +1,6 @@
-# Alur Kerja & Arsitektur Monitoring Grafana Loki
+# Alur Kerja & Arsitektur Monitoring Grafana Loki dengan Grafana Alloy
 
-Dokumen ini menjelaskan alur kerja sistem monitoring log kontainer Docker menggunakan **Grafana Loki** dan **Promtail**, serta pemetaan port yang digunakan dalam proyek Federated Learning ini.
+Dokumen ini menjelaskan arsitektur dan alur kerja sistem monitoring log kontainer Docker terpusat menggunakan **Grafana Loki** dan **Grafana Alloy** (sebagai pengganti modern untuk Promtail) serta pemetaan port yang digunakan dalam proyek Federated Learning ini.
 
 ---
 
@@ -11,16 +11,16 @@ Berikut adalah tabel port yang digunakan oleh seluruh layanan di dalam sistem:
 | Layanan | Port Eksternal (Host) | Port Internal (Kontainer) | Protokol | Deskripsi |
 | :--- | :--- | :--- | :--- | :--- |
 | **Grafana** | `3000` | `3000` | HTTP | Dashboard Visualisasi Log (diakses melalui browser) |
-| **Loki** | `3100` | `3100` | HTTP | Basis data penyimpan log (menerima log dari Promtail, di-query oleh Grafana) |
+| **Loki** | `3100` | `3100` | HTTP | Basis data penyimpan log (menerima log dari Grafana Alloy, di-query oleh Grafana) |
 | **MLflow Server** | `5000` | `5000` | HTTP | Pelacakan Eksperimen ML & Registry Model |
 | **FL Server (Flower)** | `8080` | `8080` | TCP (gRPC) | Server Pembelajaran Terfederasi tempat Client terhubung |
-| **Promtail** | *Tidak ada* | `9080` | HTTP | Pengumpul log kontainer (berjalan secara internal tanpa ekspos port keluar) |
+| **Grafana Alloy** | *Tidak ada* | *Internal* | HTTP | Agen pengumpul log kontainer modern (menggantikan Promtail) |
 
 ---
 
 ## 🔄 2. Diagram Alur Data (Data Flow Diagram)
 
-Berikut adalah visualisasi bagaimana log kontainer dikumpulkan, disimpan, dan divisualisasikan secara real-time:
+Berikut adalah visualisasi bagaimana log kontainer dikumpulkan secara otomatis, dikirim, disimpan, dan divisualisasikan secara real-time:
 
 ```mermaid
 sequenceDiagram
@@ -28,16 +28,16 @@ sequenceDiagram
     actor Pengembang as Developer (Anda)
     participant GF as Grafana (Port 3000)
     participant LK as Loki (Port 3100)
-    participant PT as Promtail
+    participant AY as Grafana Alloy (Agent)
     participant DK as Docker Engine Socket (/var/run/docker.sock)
     participant CN as Kontainer (fl_server, client_1, client_2, mlflow)
 
     Note over CN: Kontainer mencetak log ke Stdout/Stderr
-    PT->>DK: Membaca metadata kontainer & stream log aktif
-    DK->>PT: Mengalirkan baris log mentah kontainer
-    Note over PT: Melabeli log berdasarkan nama kontainer,<br/>ID, dan nama image
-    PT->>LK: HTTP POST /loki/api/v1/push (Mengirim log terstruktur)
-    LK->>LK: Menyimpan log dalam bentuk chunks & indeks terkompresi
+    AY->>DK: Discovery kontainer & Scraping log via unix socket
+    DK->>AY: Mengalirkan baris log mentah & properti metadata
+    Note over AY: Melabeli log (container, image, container_id) via discovery.relabel
+    AY->>LK: HTTP POST /loki/api/v1/push (Mengirim log terstruktur)
+    LK->>LK: Menyimpan log dalam chunks & indeks terkompresi
 
     Pengembang->>GF: Membuka dashboard "Docker Container Logs" di browser
     GF->>LK: HTTP GET /loki/api/v1/query_range (Mengirim query LogQL)
@@ -55,40 +55,83 @@ Proses pengumpulan log (fetch data) bekerja sepenuhnya secara dinamis dan otomat
 Seluruh aplikasi Python (Server, Client) serta MLflow mencetak informasi running ke keluaran standar (`stdout` / `stderr`). Docker Engine menangkap output ini dan menyimpannya di host Linux dalam format JSON-file.
 
 ### Langkah B: Penemuan Kontainer secara Otomatis (Docker Service Discovery)
-Promtail dikonfigurasi dengan fitur `docker_sd_configs`. Dengan memasangkan soket Docker daemon (`/var/run/docker.sock`), Promtail dapat berkomunikasi langsung dengan Docker Engine di komputer Anda untuk:
-1. Mendeteksi setiap kontainer yang baru berjalan.
-2. Membaca properti kontainer seperti nama kontainer (`__meta_docker_container_name`), nama image (`__meta_docker_container_image`), dan ID kontainer.
+Grafana Alloy dikonfigurasi menggunakan komponen `discovery.docker "containers"` yang terhubung langsung ke soket Docker daemon (`/var/run/docker.sock`). Setiap 5 detik (`refresh_interval = "5s"`), Alloy mendeteksi kontainer yang aktif dan mendapatkan propertinya.
 
-### Langkah C: Pelabelan dan Transformasi Log
-Sebelum log dikirim ke Loki, Promtail menggunakan `relabel_configs` untuk merapikan metadata kontainer menjadi label Loki yang bersih:
-* `/fl_server` diubah menjadi `container="fl_server"`
-* `/client_1` diubah menjadi `container="client_1"`
+### Langkah C: Pelabelan dan Transformasi Log (Relabeling)
+Menggunakan komponen `discovery.relabel "docker_labels"`, Alloy menyaring dan merapikan metadata kontainer menjadi label Loki terstruktur:
+*   `__meta_docker_container_name` dengan regex `/(.*)` diubah menjadi label `container`.
+*   `__meta_docker_container_image` diubah menjadi label `image`.
+*   `__meta_docker_container_id` diubah menjadi label `container_id`.
 
-Hal ini sangat mempercepat proses pencarian log nantinya di Grafana.
+Hal ini sangat mempercepat query pencarian logs pada database Loki.
 
-### Langkah D: Pengiriman Log ke Loki
-Setiap baris log baru dialirkan (stream) oleh Promtail secara berkala menggunakan protokol HTTP POST ke API Loki (`http://loki:3100/loki/api/v1/push`).
+### Langkah D: Scrape dan Pengiriman Log (Scraping & Shipping)
+Komponen `loki.source.docker "docker_logs"` mengalirkan baris log dari kontainer-kontainer terpilih dan meneruskannya ke komponen `loki.write "local"` untuk dikirimkan melalui protokol HTTP POST ke API Loki (`http://loki:3100/loki/api/v1/push`).
 
 ### Langkah E: Query dan Visualisasi di Grafana
 Saat Anda mengakses Grafana pada port `3000`, Grafana mengirimkan permintaan pencarian berbasis bahasa **LogQL** ke Loki.
 
 *Sebagai contoh:*
-* Untuk menampilkan log Flower Client 1: `{container="client_1"}`
-* Untuk menampilkan log yang hanya berisi kata "error" secara real-time: `{container=~"client_1|client_2"} |~ "error"`
-
-Visualisasi grafik, jumlah error, dan teks log interaktif yang Anda lihat di layar Anda adalah hasil akhir dari alur terintegrasi ini!
+*   Untuk menampilkan semua log Flower Client 1: `{container="client_1"}`
+*   Untuk menampilkan log dari Client 1 dan Client 2 yang mengandung kata "warning" secara real-time: `{container=~"client_1|client_2"} |~ "WARNING"`
 
 ---
 
-## 🐛 4. Catatan Resolusi Masalah: Tabrakan Namespace Data (Namespace Collision)
+## ⚙️ 4. Konfigurasi Grafana Alloy (`config.alloy`)
+
+Berikut adalah konfigurasi Alloy yang digunakan dalam proyek ini:
+
+```alloy
+// Discover Docker containers
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+  refresh_interval = "5s"
+}
+
+// Relabel container names and metadata to clean up labels
+discovery.relabel "docker_labels" {
+  targets = discovery.docker.containers.targets
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "container"
+  }
+  rule {
+    source_labels = ["__meta_docker_container_image"]
+    target_label  = "image"
+  }
+  rule {
+    source_labels = ["__meta_docker_container_id"]
+    target_label  = "container_id"
+  }
+}
+
+// Scrape logs from discovered containers
+loki.source.docker "docker_logs" {
+  host       = "unix:///var/run/docker.sock"
+  targets    = discovery.relabel.docker_labels.output
+  forward_to = [loki.write.local.receiver]
+}
+
+// Write logs to Loki
+loki.write "local" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}
+```
+
+---
+
+## 🐛 5. Catatan Resolusi Masalah: Tabrakan Namespace Data (Namespace Collision)
 
 Jika Anda melihat error berikut pada kontainer client:
 `ImportError: cannot import name 'dataset' from 'data' (unknown location)`
 
 ### Mengapa ini terjadi?
-1. Kontainer `client_1` dan `client_2` melakukan mounting volume `./data` (direktori lokal berisi CSV) ke `/app/data` di dalam kontainer.
-2. Di saat yang sama, kode client di `/app/src/client/client.py` mencoba memanggil `from data import dataset` (untuk merujuk ke modul `src/data/dataset.py`).
-3. Karena `/app/data` (volume data mentah) ditemukan lebih awal di jalur pencarian Python (`sys.path`) dibandingkan `/app/src/data`, Python mencoba mengimpor dari direktori CSV tersebut dan gagal karena tidak menemukan `dataset.py`.
+1.  Kontainer `client_1` dan `client_2` melakukan mounting volume `./data` (direktori lokal berisi CSV) ke `/app/data` di dalam kontainer.
+2.  Di saat yang sama, kode client di `/app/src/client/client.py` mencoba memanggil `from data import dataset` (untuk merujuk ke modul `src/data/dataset.py`).
+3.  Karena `/app/data` (volume data mentah) ditemukan lebih awal di jalur pencarian Python (`sys.path`) dibandingkan `/app/src/data`, Python mencoba mengimpor dari direktori CSV tersebut dan gagal karena tidak menemukan `dataset.py`.
 
 ### Bagaimana ini diatasi?
 Kami menambahkan kode berikut di bagian paling atas berkas `src/client/client.py`:
