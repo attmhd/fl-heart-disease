@@ -1,7 +1,12 @@
+# ruff: noqa
+import logging
 import os
 
 import flwr as fl
 import mlflow
+
+# Suppress spurious MLflow requirements mismatch warnings
+logging.getLogger("mlflow.utils.requirements_utils").setLevel(logging.ERROR)
 
 from configs import config
 from data import dataset
@@ -55,7 +60,7 @@ class MLflowStrategy(fl.server.strategy.FedAvg):
             client.update_registered_model(name=model_name, description="Model global hasil pembelajaran terfederasi menggunakan Flower untuk klasifikasi penyakit jantung (UCI Heart Disease Dataset).")
 
             # Dapatkan nomor versi model terbaru yang baru saja didaftarkan menggunakan search_model_versions (API non-deprecated)
-            versions = client.search_model_versions(filter_string=f"name='{model_name}'", order_by=["version DESC"])
+            versions = client.search_model_versions(filter_string=f"name='{model_name}'", order_by=["version_number DESC"])
             if versions:
                 latest_version = versions[0].version
 
@@ -236,7 +241,7 @@ class MLflowStrategy(fl.server.strategy.FedAvg):
                     # Log model terbaik ke MLflow dan daftarkan ke Model Registry
                     model_name = config.MLFLOW_MODEL_NAME
                     print(f"Logging the best global model from Round {self.best_round} (Accuracy: {self.best_accuracy:.4f}) to MLflow Model Registry...")
-                    mlflow.sklearn.log_model(sk_model=lr_model, name="model", registered_model_name=model_name)
+                    mlflow.sklearn.log_model(sk_model=lr_model, name="model", registered_model_name=model_name, serialization_format="skops")
 
                     # Jalankan evaluasi sentral khusus untuk BEST model pada server
                     if os.path.exists(config.SERVER_DATASET_PATH):
