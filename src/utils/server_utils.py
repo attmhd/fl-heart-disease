@@ -339,5 +339,9 @@ def build_strategy_with_mlflow(server_run_id: str):
         on_fit_config_fn=fit_config_with_run_id,
         on_evaluate_config_fn=evaluate_config,
         evaluate_fn=evaluate_fn,
+        fraction_fit=config.FL_FRACTION_FIT,
+        fraction_evaluate=config.FL_FRACTION_EVALUATE,
+        min_fit_clients=config.FL_MIN_FIT_CLIENTS,
+        min_evaluate_clients=config.FL_MIN_EVALUATE_CLIENTS,
     )
     return strategy

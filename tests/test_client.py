@@ -9,10 +9,10 @@ import numpy as np
 import pandas as pd
 import pytest
 from sklearn.linear_model import LogisticRegression
-from src.client.client import HeartDiseaseClient
 
 # Import local modules using absolute path
 from src.data import dataset
+from src.utils.client_utils import HeartDiseaseClient
 
 
 @pytest.fixture

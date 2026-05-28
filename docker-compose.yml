@@ -34,6 +34,15 @@ services:
       - MLFLOW_TRACKING_URI=http://mlflow_server:5000
       - SERVER_DATASET_PATH=/app/data/processed/heart_disease_hungary_cleaned.csv
       - GIT_PYTHON_REFRESH=quiet
+      - FL_NUM_ROUNDS
+      - FL_FRACTION_FIT
+      - FL_FRACTION_EVALUATE
+      - FL_MIN_FIT_CLIENTS
+      - FL_MIN_EVALUATE_CLIENTS
+      - MODEL_MAX_ITER
+      - MODEL_SOLVER
+      - MODEL_C
+      - MODEL_PENALTY
     ports:
       - "8080:8080"
     healthcheck:
@@ -63,6 +72,10 @@ services:
       - CLIENT_ID=client_1
       - MLFLOW_TRACKING_URI=http://mlflow_server:5000
       - GIT_PYTHON_REFRESH=quiet
+      - MODEL_MAX_ITER
+      - MODEL_SOLVER
+      - MODEL_C
+      - MODEL_PENALTY
     command: python -m src.client.client
     restart: on-failure
     networks:
@@ -85,6 +98,10 @@ services:
       - CLIENT_ID=client_2
       - MLFLOW_TRACKING_URI=http://mlflow_server:5000
       - GIT_PYTHON_REFRESH=quiet
+      - MODEL_MAX_ITER
+      - MODEL_SOLVER
+      - MODEL_C
+      - MODEL_PENALTY
     command: python -m src.client.client
     restart: on-failure
     networks:
