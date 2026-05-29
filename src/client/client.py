@@ -1,4 +1,11 @@
 # ruff: noqa: E402
+"""
+Flower Federated Learning Client node service launcher.
+
+This module initializes local datasets, creates the numpy clients, connects with
+the Flower Server gRPC fleet, and logs distributed model updates to MLflow.
+"""
+
 import os
 import sys
 import warnings
@@ -24,7 +31,11 @@ mlflow.set_experiment(config.MLFLOW_EXPERIMENT_NAME)
 
 
 def client_fn(context: fl.common.Context) -> fl.client.Client:
-    """ClientApp factory function — called by flower-superexec / flower-supernode."""
+    """ClientApp factory function — called by flower-superexec / flower-supernode.
+
+    Args:
+        context (Context): Flower shared run context.
+    """
     X_train, X_test, y_train, y_test = dataset.load_data(config.CLIENT_DATASET_PATH)
     client = create_client(X_train, y_train, X_test, y_test, config.CLIENT_ID)
     return client.to_client()
@@ -37,6 +48,7 @@ app = fl.client.ClientApp(client_fn=client_fn)
 def start_client():
     """Legacy entry point — starts client directly via Python (for backward compatibility).
 
+    Wraps the MLflow child run and starts the gRPC infrastructure inline.
     Kept for local/Docker Compose runs where flower-supernode is not separately deployed.
     """
     X_train, X_test, y_train, y_test = dataset.load_data(config.CLIENT_DATASET_PATH)

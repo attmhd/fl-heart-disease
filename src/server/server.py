@@ -1,4 +1,11 @@
 # ruff: noqa: E402
+"""
+Flower Federated Learning Server orchestrator and service launcher.
+
+This module initializes the MLflow parent experiment, builds the FedAvg federation
+strategy with client telemetry tracking, and starts the gRPC network listener.
+"""
+
 import os
 import warnings
 
@@ -24,6 +31,9 @@ def server_fn(context: fl.common.Context) -> fl.server.ServerAppComponents:
     """ServerApp factory function — called by flower-superexec / flower-superlink.
 
     MLflow parent run is started here so it wraps the full training session.
+
+    Args:
+        context (Context): Flower shared run context.
     """
     run_name = f"Federated_Server_Logistic_Regression_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 

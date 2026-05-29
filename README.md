@@ -93,12 +93,20 @@ graph TB
 * Pengumpulan log aktif dan otomatis dari seluruh container (`fl_server`, `client_1`, `client_2`, `mlflow`) dengan menghubungkan soket Docker `/var/run/docker.sock`.
 * Dashboard **Docker Container Logs** siap pakai di Grafana (Port 3000) untuk mempermudah pencarian log, visualisasi volume log, filter container, dan monitoring *error* / *warning* secara real-time.
 
+### 5. Interactive Streamlit Testing Dashboard (`demo_app.py`)
+* **Interactive Parameter Tuning**: Customize the number of rounds, Scikit-learn Logistic Regression solver, penalty, max iterations, and Flower federation strategy parameters (Fraction Fit, Fraction Evaluate, Min Fit/Evaluate Clients) instantly from the UI.
+* **Docker Compose Orchestration**: Run, recreate, and stop the entire containerized Federated Learning stack with one click, utilizing security group bypasses (`sg docker -c`) for privilege-less process spawning.
+* **MLflow Evaluation Artifacts Viewer**: Retrieve classification reports and confusion matrix plots directly from the MLflow model registry and render them inside the dashboard dynamically.
+* **Local CSV Dataset Uploader**: Easily upload and overwrite local dataset slices (Server, Client 1, and Client 2 datasets) for blackbox robustness testing.
+* **Scrollable Log Box Terminals**: Read clean terminal logs in custom-styled, scrollable dark consoles with levels (Info, Warning, Error) filtering.
+
 ---
 
 ## 🔌 Pemetaan Port Layanan
 
 | Layanan | Port Eksternal (Host) | Port Internal (Container) | Protokol | Deskripsi |
 | :--- | :--- | :--- | :--- | :--- |
+| **Streamlit Dashboard** | `8501` | *N/A (Host)* | HTTP | Interactive Testing Portal Dashboard |
 | **Grafana** | `3000` | `3000` | HTTP | Dashboard Visualisasi Log & Monitoring |
 | **Loki** | `3100` | `3100` | HTTP | Basis data log tersentralisasi |
 | **MLflow Server** | `5000` | `5000` | HTTP | Experiment Tracking & Model Registry |
@@ -111,21 +119,25 @@ graph TB
 
 ```text
 .
-├── configs/            # Konfigurasi global (MLflow, Flower, dsb)
+├── dashboard/          # Modul pendukung Streamlit dashboard (Control Panel, Health, Monitor, dsb)
+│   ├── commands.py     # Koleksi terisolasi untuk seluruh CLI command Docker & Local
+│   ├── process_manager.py # Manajemen eksekusi subprocess & Docker
+│   ├── styles.py       # Custom CSS & font untuk estetika premium
+│   └── tab_*.py        # File visualisasi komponen tab Streamlit
 ├── data/               # Dataset mentah dan hasil pemrosesan
 │   ├── raw/
 │   └── processed/
 ├── src/                # Source code utama
 │   ├── client/         # Implementasi Flower Client & kalkulasi bobot L2
+│   ├── configs/        # Konfigurasi global (MLflow, Flower, dsb)
 │   ├── server/         # Implementasi Flower Server, FedAvg & Registry Automation
 │   ├── models/         # Arsitektur model (Scikit-learn Logistic Regression)
 │   └── utils/          # Fungsi pembantu (data loading, preprocessing)
 ├── monitoring/         # Konfigurasi Grafana Loki, Alloy, & Grafana
-│   ├── grafana/        # Dashboards & Datasources provisioning
-│   └── loki/           # Konfigurasi database Loki
 ├── Dockerfile.client   # Dockerfile teroptimasi (slim size dengan Astral UV)
 ├── Dockerfile.server   # Dockerfile teroptimasi (slim size dengan Astral UV)
 ├── docker-compose.yml  # Orkestrasi seluruh layanan FL + Observabilitas
+├── demo_app.py         # Entrypoint portal Streamlit Dashboard
 └── pyproject.toml      # Manajemen dependensi Python & konfigurasi Ruff/Black
 ```
 
@@ -142,9 +154,19 @@ Sebelum memulai, pastikan sistem Anda telah menginstal:
 
 ## ⚙️ Cara Menjalankan
 
-### 1. Menggunakan Docker Compose (Sangat Direkomendasikan)
+### 1. Menggunakan Streamlit Dashboard (Sangat Direkomendasikan)
 
-Ini adalah cara tercepat untuk menjalankan seluruh ekosistem FL beserta sistem monitoring log tersentralisasi:
+Ini adalah metode termudah untuk melakukan testing parameter, monitoring metrik, dan mengunggah dataset baru secara interaktif:
+
+```bash
+# Install seluruh dependensi dan jalankan Streamlit portal
+uv run streamlit run demo_app.py
+```
+Arahkan peramban Anda ke [http://localhost:8501](http://localhost:8501) untuk mengakses portal testing Anda secara langsung.
+
+### 2. Menggunakan Docker Compose (Command Line)
+
+Ini adalah cara tercepat untuk menjalankan seluruh ekosistem FL beserta sistem monitoring log tersentralisasi tanpa dashboard:
 
 ```bash
 docker-compose up --build
@@ -155,7 +177,7 @@ Setelah semua kontainer aktif:
 - **Grafana Loki Logs**: Buka [http://localhost:3000](http://localhost:3000) (User: `admin` | Sandi: `admin`).
   - Pilih menu **Dashboards** -> folder **Monitoring** -> pilih dashboard **Docker Container Logs** untuk memantau log secara langsung.
 
-### 2. Menjalankan Secara Lokal (Langkah Manual)
+### 3. Menjalankan Secara Lokal (Langkah Manual)
 
 Jika ingin menjalankan tanpa Docker, siapkan virtual environment terlebih dahulu:
 

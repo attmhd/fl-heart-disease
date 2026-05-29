@@ -1,6 +1,12 @@
+"""
+Infrastructure Health connectivity scanner and dashboard visualizer.
+
+This module renders real-time connectivity scan cards for Flower Server, MLflow,
+Loki, and Alloy agents alongside their network topology states.
+"""
+
 import streamlit as st
 
-# Human-readable container descriptions
 CONTAINER_DESC = {
     "fl_server": "FL Server",
     "mlflow_server": "MLflow Engine",
@@ -10,7 +16,12 @@ CONTAINER_DESC = {
 
 
 def render_health_tab(health_states, containers):
-    """Render Tab 2: Infrastructure & Blackbox Health connectivity scan cards and topography."""
+    """Render Tab 2: Infrastructure & Blackbox Health connectivity scan cards and topography.
+
+    Args:
+        health_states (dict): Liveness state dictionary map of container names.
+        containers (list): Target list of active containers to render status.
+    """
     st.markdown('<div class="section-header">Real-time Connectivity Scan</div>', unsafe_allow_html=True)
     st.write("Verifies execution states and connection liveness of all services in the stack via Loki log scraping.")
 

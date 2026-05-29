@@ -1,8 +1,20 @@
+"""
+Centralized Log Terminal visualizer and severity filter component.
+
+This module processes, filters, and renders formatted logs scraped from the
+centralized Loki telemetry server inside a scrollable web console.
+"""
+
 import streamlit as st
 
 
 def render_logs_tab(all_logs, containers):
-    """Render Tab 3: Live System Logs Stream with filters by node and severity."""
+    """Render Tab 3: Live System Logs Stream with filters by node and severity.
+
+    Args:
+        all_logs (list): Complete list of logs fetched from Loki.
+        containers (list): Container names list for dropdown filtering.
+    """
     st.markdown('<div class="section-header">Centralized Log Terminal</div>', unsafe_allow_html=True)
 
     col_filters1, col_filters2 = st.columns([1, 1], gap="medium")
@@ -27,7 +39,7 @@ def render_logs_tab(all_logs, containers):
     # Print logs
     if filtered_logs:
         log_text = ""
-        for log in filtered_logs[-150:]:  # Show latest 150 lines
+        for log in filtered_logs[-150:]:  # Slice latest 150 lines from list
             timestamp_str = log["timestamp"].strftime("%Y-%m-%d %H:%M:%S")
             log_text += f"[{timestamp_str}] [{log['container'].upper()}] {log['message']}\n"
 
