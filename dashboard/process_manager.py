@@ -4,6 +4,16 @@ import sys
 
 import streamlit as st
 
+from .commands import (
+    DOCKER_CMD_PS,
+    DOCKER_CMD_STOP,
+    DOCKER_CMD_UP,
+    LOCAL_CLIENT_1_ENV,
+    LOCAL_CLIENT_2_ENV,
+    LOCAL_CLIENT_CMD,
+    LOCAL_SERVER_CMD,
+)
+
 
 def init_session_states():
     """Initialize PIDs and state variables to persist across Streamlit reruns."""
@@ -71,7 +81,7 @@ def start_local_runs(rounds, solver, max_iter, c, penalty):
 
     # 1. Start Server
     try:
-        server_proc = subprocess.Popen([sys.executable, "-m", "src.server.server"], env=env, stdout=log_file, stderr=subprocess.STDOUT)
+        server_proc = subprocess.Popen([sys.executable, "-m"] + LOCAL_SERVER_CMD, env=env, stdout=log_file, stderr=subprocess.STDOUT)
         st.session_state.server_pid = server_proc.pid
     except Exception as e:
         log_file.write(f"Failed to start server: {e}\n")
@@ -81,10 +91,8 @@ def start_local_runs(rounds, solver, max_iter, c, penalty):
     # 2. Start Client 1
     try:
         env1 = env.copy()
-        env1["CLIENT_ID"] = "client_1"
-        env1["DATASET_PATH"] = "data/processed/heart_disease_hungary_cleaned.csv"
-        env1["SERVER_ADDRESS"] = "127.0.0.1:8080"
-        client1_proc = subprocess.Popen([sys.executable, "-m", "src.client.client"], env=env1, stdout=log_file, stderr=subprocess.STDOUT)
+        env1.update(LOCAL_CLIENT_1_ENV)
+        client1_proc = subprocess.Popen([sys.executable, "-m"] + LOCAL_CLIENT_CMD, env=env1, stdout=log_file, stderr=subprocess.STDOUT)
         st.session_state.client_pids.append(client1_proc.pid)
     except Exception as e:
         log_file.write(f"Failed to start client_1: {e}\n")
@@ -92,10 +100,8 @@ def start_local_runs(rounds, solver, max_iter, c, penalty):
     # 3. Start Client 2
     try:
         env2 = env.copy()
-        env2["CLIENT_ID"] = "client_2"
-        env2["DATASET_PATH"] = "data/processed/heart_disease_switzerland_cleaned.csv"
-        env2["SERVER_ADDRESS"] = "127.0.0.1:8080"
-        client2_proc = subprocess.Popen([sys.executable, "-m", "src.client.client"], env=env2, stdout=log_file, stderr=subprocess.STDOUT)
+        env2.update(LOCAL_CLIENT_2_ENV)
+        client2_proc = subprocess.Popen([sys.executable, "-m"] + LOCAL_CLIENT_CMD, env=env2, stdout=log_file, stderr=subprocess.STDOUT)
         st.session_state.client_pids.append(client2_proc.pid)
     except Exception as e:
         log_file.write(f"Failed to start client_2: {e}\n")
@@ -118,8 +124,7 @@ def start_docker_runs(rounds, solver, max_iter, c, penalty, fraction_fit=1.0, fr
     env["FL_MIN_EVALUATE_CLIENTS"] = str(min_evaluate_clients)
 
     # Wrap with sg docker -c to bypass permission issues without needing interactive password
-    raw_cmd = "docker compose up -d --build"
-    cmd = ["sg", "docker", "-c", raw_cmd]
+    cmd = ["sg", "docker", "-c", DOCKER_CMD_UP]
 
     try:
         log_file = open("local_fl_run.log", "w", encoding="utf-8")
@@ -141,8 +146,7 @@ def start_docker_runs(rounds, solver, max_iter, c, penalty, fraction_fit=1.0, fr
 def stop_docker_runs():
     """Stop Docker Compose FL services in background."""
     env = os.environ.copy()
-    raw_cmd = "docker compose stop fl_server client_1 client_2"
-    cmd = ["sg", "docker", "-c", raw_cmd]
+    cmd = ["sg", "docker", "-c", DOCKER_CMD_STOP]
 
     try:
         log_file = open("local_fl_run.log", "a", encoding="utf-8")
@@ -164,8 +168,7 @@ def get_docker_health_states(containers):
     states = {name: False for name in containers}
     try:
         # Fetch status of running services in json format
-        raw_cmd = "docker compose ps --format json"
-        cmd = ["sg", "docker", "-c", raw_cmd]
+        cmd = ["sg", "docker", "-c", DOCKER_CMD_PS]
         res = subprocess.run(cmd, capture_output=True, text=True, timeout=2.0, check=False)  # noqa: PLW1510
         if res.returncode == 0 and res.stdout.strip():
             import json

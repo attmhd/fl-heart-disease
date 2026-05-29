@@ -21,3 +21,5 @@ mlflow.db
 .pytest_cache/
 
 docs/
+
+*.log
