@@ -1,140 +1,264 @@
 import plotly.graph_objects as go
 import streamlit as st
 
+# ──────────────────────────────────────────────
+# Colour palette — consistent across all charts
+# ──────────────────────────────────────────────
+_COLORS = [
+    "#6366f1",  # indigo
+    "#10b981",  # emerald
+    "#f59e0b",  # amber
+    "#ef4444",  # red
+    "#06b6d4",  # cyan
+    "#ec4899",  # pink
+    "#8b5cf6",  # violet
+    "#14b8a6",  # teal
+    "#f97316",  # orange
+    "#84cc16",  # lime
+]
+
+
+def _color(idx: int) -> str:
+    return _COLORS[idx % len(_COLORS)]
+
+
+def _make_chart(title: str, y_label: str, df_pivot, selected_metrics: list) -> go.Figure:
+    """Build a Plotly line chart for the given metric list."""
+    fig = go.Figure()
+    for i, metric in enumerate(selected_metrics):
+        if metric not in df_pivot.columns:
+            continue
+        fig.add_trace(
+            go.Scatter(
+                x=df_pivot["Round"],
+                y=df_pivot[metric],
+                mode="lines+markers",
+                name=metric,
+                line=dict(color=_color(i), width=2.5),
+                marker=dict(size=7),
+            )
+        )
+    fig.update_layout(
+        title=dict(text=title, font=dict(size=14, color="#f8fafc")),
+        xaxis_title="FL Round",
+        yaxis_title=y_label,
+        template="plotly_dark",
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        margin=dict(l=10, r=10, t=60, b=20),
+        xaxis=dict(dtick=1),
+    )
+    return fig
+
+
+def _classify_metrics(all_metrics: list):
+    """Split metric names into (train_acc, val_acc, train_loss, val_loss, train_f1, val_f1, duration, other)."""
+    train_acc, val_acc = [], []
+    train_loss, val_loss = [], []
+    train_f1, val_f1 = [], []
+    duration, other = [], []
+
+    for m in all_metrics:
+        ml = m.lower()
+        is_train = "train" in ml or "fedavg train" in ml
+        is_val = "val" in ml or "centralized" in ml or "eval val" in ml
+        is_acc = "accuracy" in ml
+        is_loss = "loss" in ml and "duration" not in ml
+        is_f1 = "f1" in ml or "precision" in ml or "recall" in ml
+        is_dur = "duration" in ml
+
+        if is_dur:
+            duration.append(m)
+        elif is_f1 and is_train:
+            train_f1.append(m)
+        elif is_f1 and (is_val or not is_train):
+            val_f1.append(m)
+        elif is_acc and is_train:
+            train_acc.append(m)
+        elif is_acc and (is_val or not is_train):
+            val_acc.append(m)
+        elif is_loss and is_train:
+            train_loss.append(m)
+        elif is_loss and (is_val or not is_train):
+            val_loss.append(m)
+        else:
+            other.append(m)
+
+    return train_acc, val_acc, train_loss, val_loss, train_f1, val_f1, duration, other
+
 
 def render_monitor_tab(df_pivot, best_round, best_accuracy, mlflow_artifacts=None):  # noqa: PLR0915
-    """Render Tab 1: Live FL Training Monitor with Plotly accuracy and loss charts."""
+    """Render Tab 1: Live FL Training Monitor with Plotly charts."""
     st.markdown('<div class="section-header">Federated Model Progression</div>', unsafe_allow_html=True)
 
-    if not df_pivot.empty:
-        # Dynamic filter for metric traces
-        st.markdown("<p style='color:#94a3b8; font-size:0.9rem; margin-top:-0.5rem;'>Filter specific server or client-side metrics to trace their progress over the FL rounds.</p>", unsafe_allow_html=True)
-        col_sel1, col_sel2 = st.columns(2, gap="medium")
-
-        all_metrics = [col for col in df_pivot.columns if col != "Round"]
-        train_acc_metrics = [m for m in all_metrics if "Train" in m and "Accuracy" in m]
-        val_acc_metrics = [m for m in all_metrics if ("Val" in m or "Centralized" in m or "Global" in m) and "Accuracy" in m]
-        train_loss_metrics = [m for m in all_metrics if "Train" in m and "Loss" in m]
-        val_loss_metrics = [m for m in all_metrics if ("Val" in m or "Centralized" in m or "Global" in m) and "Loss" in m]
-
-        with col_sel1:
-            selected_train_acc = st.multiselect("Select Training Accuracy Metrics", options=train_acc_metrics, default=train_acc_metrics)
-            selected_val_acc = st.multiselect(
-                "Select Validation Accuracy Metrics", options=val_acc_metrics, default=[m for m in ["Centralized Accuracy", "Client Val Accuracy", "Global Val Accuracy", "Fedavg Val Accuracy"] if m in val_acc_metrics] or val_acc_metrics[:2]
-            )
-
-        with col_sel2:
-            selected_train_loss = st.multiselect("Select Training Loss Metrics", options=train_loss_metrics, default=train_loss_metrics)
-            selected_val_loss = st.multiselect("Select Validation Loss Metrics", options=val_loss_metrics, default=[m for m in ["Centralized Loss", "Global Val Loss", "Fedavg Val Loss"] if m in val_loss_metrics] or val_loss_metrics[:1])
-
-        # ROW 1: Training Accuracy vs Validation Accuracy
-        col_acc_train, col_acc_val = st.columns(2, gap="medium")
-        colors = ["#6366f1", "#10b981", "#ef4444", "#f59e0b", "#06b6d4", "#ec4899", "#8b5cf6", "#14b8a6"]
-
-        with col_acc_train:
-            st.markdown("<h4 style='color:#6366f1; font-weight:600; margin-bottom:0.5rem;'>Training Accuracy</h4>", unsafe_allow_html=True)
-            fig_train_acc = go.Figure()
-            for i, metric in enumerate(selected_train_acc):
-                color = colors[i % len(colors)]
-                fig_train_acc.add_trace(go.Scatter(x=df_pivot["Round"], y=df_pivot[metric], mode='lines+markers', name=metric, line=dict(color=color, width=2.5), marker=dict(size=7)))
-            fig_train_acc.update_layout(
-                title=dict(text="Training Accuracy per Round", font=dict(size=14, color="#f8fafc")),
-                xaxis_title="FL Round",
-                yaxis_title="Accuracy",
-                template="plotly_dark",
-                paper_bgcolor="rgba(0,0,0,0)",
-                plot_bgcolor="rgba(0,0,0,0)",
-                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-                margin=dict(l=10, r=10, t=60, b=20),
-            )
-            st.plotly_chart(fig_train_acc, width='stretch')
-
-        with col_acc_val:
-            st.markdown("<h4 style='color:#10b981; font-weight:600; margin-bottom:0.5rem;'>Validation Accuracy</h4>", unsafe_allow_html=True)
-            fig_val_acc = go.Figure()
-            for i, metric in enumerate(selected_val_acc):
-                color = colors[i % len(colors)]
-                fig_val_acc.add_trace(go.Scatter(x=df_pivot["Round"], y=df_pivot[metric], mode='lines+markers', name=metric, line=dict(color=color, width=2.5), marker=dict(size=7)))
-            fig_val_acc.update_layout(
-                title=dict(text="Validation Accuracy per Round", font=dict(size=14, color="#f8fafc")),
-                xaxis_title="FL Round",
-                yaxis_title="Accuracy",
-                template="plotly_dark",
-                paper_bgcolor="rgba(0,0,0,0)",
-                plot_bgcolor="rgba(0,0,0,0)",
-                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-                margin=dict(l=10, r=10, t=60, b=20),
-            )
-            st.plotly_chart(fig_val_acc, width='stretch')
-
-        # ROW 2: Training Loss vs Validation Loss
-        col_loss_train, col_loss_val = st.columns(2, gap="medium")
-        colors_loss = ["#ef4444", "#3b82f6", "#10b981", "#f59e0b", "#8b5cf6", "#ec4899", "#06b6d4", "#14b8a6"]
-
-        with col_loss_train:
-            st.markdown("<h4 style='color:#ef4444; font-weight:600; margin-bottom:0.5rem;'>Training Loss</h4>", unsafe_allow_html=True)
-            fig_train_loss = go.Figure()
-            for i, metric in enumerate(selected_train_loss):
-                color = colors_loss[i % len(colors_loss)]
-                fig_train_loss.add_trace(go.Scatter(x=df_pivot["Round"], y=df_pivot[metric], mode='lines+markers', name=metric, line=dict(color=color, width=2.5), marker=dict(size=7)))
-            fig_train_loss.update_layout(
-                title=dict(text="Training Loss per Round", font=dict(size=14, color="#f8fafc")),
-                xaxis_title="FL Round",
-                yaxis_title="Loss",
-                template="plotly_dark",
-                paper_bgcolor="rgba(0,0,0,0)",
-                plot_bgcolor="rgba(0,0,0,0)",
-                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-                margin=dict(l=10, r=10, t=60, b=20),
-            )
-            st.plotly_chart(fig_train_loss, width='stretch')
-
-        with col_loss_val:
-            st.markdown("<h4 style='color:#f59e0b; font-weight:600; margin-bottom:0.5rem;'>Validation Loss</h4>", unsafe_allow_html=True)
-            fig_val_loss = go.Figure()
-            for i, metric in enumerate(selected_val_loss):
-                color = colors_loss[i % len(colors_loss)]
-                fig_val_loss.add_trace(go.Scatter(x=df_pivot["Round"], y=df_pivot[metric], mode='lines+markers', name=metric, line=dict(color=color, width=2.5), marker=dict(size=7)))
-            fig_val_loss.update_layout(
-                title=dict(text="Validation Loss per Round", font=dict(size=14, color="#f8fafc")),
-                xaxis_title="FL Round",
-                yaxis_title="Loss",
-                template="plotly_dark",
-                paper_bgcolor="rgba(0,0,0,0)",
-                plot_bgcolor="rgba(0,0,0,0)",
-                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-                margin=dict(l=10, r=10, t=60, b=20),
-            )
-            st.plotly_chart(fig_val_loss, width='stretch')
-
-        # MLflow Artifacts Section
-        if mlflow_artifacts:
-            st.markdown('<div class="section-header">MLflow Evaluation Artifacts</div>', unsafe_allow_html=True)
-            st.write("Dynamic centralized and client-side metrics classification reports and confusion matrices retrieved directly from the MLflow Server, displayed side-by-side for comparison.")
-
-            # Sort keys: server first, then client_1, client_2, etc.
-            node_keys = list(mlflow_artifacts.keys())
-            node_keys.sort(key=lambda x: 0 if x == "server" else int(x.split("_")[1]) if "_" in x and x.split("_")[1].isdigit() else 99)
-
-            cols_nodes = st.columns(len(node_keys), gap="large")
-            for idx, selected_node in enumerate(node_keys):
-                with cols_nodes[idx]:
-                    title = "Server Centralized Evaluation" if selected_node == "server" else f"Distributed {selected_node.upper()}"
-                    st.markdown(f"#### {title}")
-
-                    node_data = mlflow_artifacts[selected_node]
-
-                    st.markdown("**Confusion Matrix Plot**")
-                    if "confusion_matrix" in node_data:
-                        st.image(node_data["confusion_matrix"], caption=f"Confusion Matrix - {selected_node.upper()}", width='stretch')
-                    else:
-                        st.info("No confusion matrix plot artifact found.")
-
-                    st.markdown("**Classification Report**")
-                    if "report" in node_data:
-                        st.code(node_data["report"], language="text")
-                    else:
-                        st.info("No classification report artifact found.")
-
-    else:
+    if df_pivot.empty:
         st.warning("No federated training evaluation logs found yet. Start the Flower server and clients to begin streaming metrics.")
+        return
+
+    all_metrics = [col for col in df_pivot.columns if col != "Round"]
+    train_acc, val_acc, train_loss, val_loss, train_f1, val_f1, duration, _ = _classify_metrics(all_metrics)
+
+    # ──────────────────────────────────────────────
+    # Section: Multiselect filters
+    # ──────────────────────────────────────────────
+    st.markdown(
+        "<p style='color:#94a3b8; font-size:0.9rem; margin-top:-0.5rem;'>" "Filter specific server or client-side metrics to trace their progress over the FL rounds." "</p>",
+        unsafe_allow_html=True,
+    )
+
+    with st.expander("⚙️ Metric Filter Settings", expanded=True):
+        fc1, fc2, fc3 = st.columns(3, gap="medium")
+
+        MAX_DEFAULT_METRICS = 3
+
+        with fc1:
+            sel_train_acc = st.multiselect(
+                "Training Accuracy Metrics",
+                options=train_acc,
+                default=train_acc,
+                key="sel_train_acc",
+            )
+            sel_val_acc = st.multiselect(
+                "Validation Accuracy Metrics",
+                options=val_acc,
+                default=val_acc[:MAX_DEFAULT_METRICS] if len(val_acc) > MAX_DEFAULT_METRICS else val_acc,
+                key="sel_val_acc",
+            )
+
+        with fc2:
+            sel_train_loss = st.multiselect(
+                "Training Loss Metrics",
+                options=train_loss,
+                default=train_loss,
+                key="sel_train_loss",
+            )
+            sel_val_loss = st.multiselect(
+                "Validation Loss Metrics",
+                options=val_loss,
+                default=val_loss[:MAX_DEFAULT_METRICS] if len(val_loss) > MAX_DEFAULT_METRICS else val_loss,
+                key="sel_val_loss",
+            )
+
+        with fc3:
+            sel_train_f1 = st.multiselect(
+                "Training F1 / Precision / Recall",
+                options=train_f1,
+                default=train_f1,
+                key="sel_train_f1",
+            )
+            sel_val_f1 = st.multiselect(
+                "Validation F1 / Precision / Recall",
+                options=val_f1,
+                default=val_f1[:MAX_DEFAULT_METRICS] if len(val_f1) > MAX_DEFAULT_METRICS else val_f1,
+                key="sel_val_f1",
+            )
+
+    # ──────────────────────────────────────────────
+    # Row 1: Training Accuracy | Validation Accuracy
+    # ──────────────────────────────────────────────
+    st.markdown("---")
+    r1c1, r1c2 = st.columns(2, gap="medium")
+
+    with r1c1:
+        st.markdown("<h4 style='color:#6366f1; font-weight:600; margin-bottom:0.5rem;'>Training Accuracy</h4>", unsafe_allow_html=True)
+        st.plotly_chart(
+            _make_chart("Training Accuracy per Round", "Accuracy", df_pivot, sel_train_acc),
+            use_container_width=True,
+        )
+
+    with r1c2:
+        st.markdown("<h4 style='color:#10b981; font-weight:600; margin-bottom:0.5rem;'>Validation Accuracy</h4>", unsafe_allow_html=True)
+        st.plotly_chart(
+            _make_chart("Validation Accuracy per Round", "Accuracy", df_pivot, sel_val_acc),
+            use_container_width=True,
+        )
+
+    # ──────────────────────────────────────────────
+    # Row 2: Training Loss | Validation Loss
+    # ──────────────────────────────────────────────
+    r2c1, r2c2 = st.columns(2, gap="medium")
+
+    with r2c1:
+        st.markdown("<h4 style='color:#ef4444; font-weight:600; margin-bottom:0.5rem;'>Training Loss</h4>", unsafe_allow_html=True)
+        st.plotly_chart(
+            _make_chart("Training Loss per Round", "Loss", df_pivot, sel_train_loss),
+            use_container_width=True,
+        )
+
+    with r2c2:
+        st.markdown("<h4 style='color:#f59e0b; font-weight:600; margin-bottom:0.5rem;'>Validation Loss</h4>", unsafe_allow_html=True)
+        st.plotly_chart(
+            _make_chart("Validation Loss per Round", "Loss", df_pivot, sel_val_loss),
+            use_container_width=True,
+        )
+
+    # ──────────────────────────────────────────────
+    # Row 3: Training F1/Precision/Recall | Validation F1/Precision/Recall
+    # ──────────────────────────────────────────────
+    if train_f1 or val_f1:
+        r3c1, r3c2 = st.columns(2, gap="medium")
+
+        with r3c1:
+            st.markdown("<h4 style='color:#8b5cf6; font-weight:600; margin-bottom:0.5rem;'>Training F1 / Precision / Recall</h4>", unsafe_allow_html=True)
+            st.plotly_chart(
+                _make_chart("Training F1 Score per Round", "Score", df_pivot, sel_train_f1),
+                use_container_width=True,
+            )
+
+        with r3c2:
+            st.markdown("<h4 style='color:#06b6d4; font-weight:600; margin-bottom:0.5rem;'>Validation F1 / Precision / Recall</h4>", unsafe_allow_html=True)
+            st.plotly_chart(
+                _make_chart("Validation F1 Score per Round", "Score", df_pivot, sel_val_f1),
+                use_container_width=True,
+            )
+
+    # ──────────────────────────────────────────────
+    # Row 4: Fit Duration (if available)
+    # ──────────────────────────────────────────────
+    if duration:
+        st.markdown("<h4 style='color:#f97316; font-weight:600; margin-bottom:0.5rem;'>Training Duration</h4>", unsafe_allow_html=True)
+        sel_duration = st.multiselect(
+            "Duration Metrics",
+            options=duration,
+            default=duration,
+            key="sel_duration",
+        )
+        st.plotly_chart(
+            _make_chart("Fit Duration per Round (seconds)", "Seconds", df_pivot, sel_duration),
+            use_container_width=True,
+        )
+
+    # ──────────────────────────────────────────────
+    # Section: MLflow Evaluation Artifacts
+    # ──────────────────────────────────────────────
+    if mlflow_artifacts:
+        st.markdown("---")
+        st.markdown('<div class="section-header">MLflow Evaluation Artifacts</div>', unsafe_allow_html=True)
+        st.write("Classification reports and confusion matrices for each node — retrieved directly from MLflow " "and displayed side-by-side for comparison.")
+
+        # Sort keys: server first, then client_1, client_2, etc.
+        node_keys = sorted(
+            mlflow_artifacts.keys(),
+            key=lambda x: 0 if x == "server" else (int(x.split("_")[1]) if "_" in x and x.split("_")[1].isdigit() else 99),
+        )
+
+        cols_nodes = st.columns(len(node_keys), gap="large")
+        for idx, node_key in enumerate(node_keys):
+            with cols_nodes[idx]:
+                title = "Server Centralized Eval" if node_key == "server" else f"Distributed {node_key.upper().replace('_', ' ')}"
+                st.markdown(f"#### {title}")
+
+                node_data = mlflow_artifacts[node_key]
+
+                st.markdown("**Confusion Matrix**")
+                if "confusion_matrix" in node_data:
+                    st.image(node_data["confusion_matrix"], caption=f"Confusion Matrix — {node_key.upper()}", use_container_width=True)
+                else:
+                    st.info("No confusion matrix plot found.")
+
+                st.markdown("**Classification Report**")
+                if "report" in node_data:
+                    st.code(node_data["report"], language="text")
+                else:
+                    st.info("No classification report found.")

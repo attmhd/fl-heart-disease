@@ -89,55 +89,49 @@ class MLflowStrategy(fl.server.strategy.FedAvg):
             print(f"Error during advanced model registry operations: {e}")
 
     def _log_client_fit_metrics(self, rnd, results):
-        """Extract and log individual client fit metrics to MLflow before aggregation."""
-        accs = []
-        losses = []
+        """Extract individual client fit metrics before aggregation."""
+        train_accs = []
+        train_losses = []
+        train_f1s = []
+        val_accs = []
+        val_losses = []
+        val_f1s = []
+        durations = []
         num_examples_list = []
 
         for idx, (client, res) in enumerate(results):
-            cid = f"client_{idx + 1}"
-            client_acc = res.metrics.get("train_accuracy")
-            client_loss = res.metrics.get("local_loss")
-            client_param_norm = res.metrics.get("param_norm")
-            client_delta_norm = res.metrics.get("delta_norm")
-            client_n = res.num_examples
+            n = res.num_examples
+            m = res.metrics
 
-            # Log metrik individual per client sebelum agregasi (pembuktian FedAvg)
-            if client_acc is not None:
-                mlflow.log_metric(f"{cid}_train_accuracy", client_acc, step=rnd)
-                accs.append(client_acc)
-            if client_loss is not None:
-                mlflow.log_metric(f"{cid}_train_loss", client_loss, step=rnd)
-                losses.append(client_loss)
-            if client_param_norm is not None:
-                mlflow.log_metric(f"{cid}_param_norm", client_param_norm, step=rnd)
-            if client_delta_norm is not None:
-                mlflow.log_metric(f"{cid}_delta_norm", client_delta_norm, step=rnd)
+            if m.get("train_accuracy") is not None:
+                train_accs.append(m["train_accuracy"])
+            if m.get("train_loss") is not None:
+                train_losses.append(m["train_loss"])
+            if m.get("train_f1") is not None:
+                train_f1s.append(m["train_f1"])
+            if m.get("val_accuracy") is not None:
+                val_accs.append(m["val_accuracy"])
+            if m.get("val_loss") is not None:
+                val_losses.append(m["val_loss"])
+            if m.get("val_f1") is not None:
+                val_f1s.append(m["val_f1"])
+            if m.get("fit_duration") is not None:
+                durations.append(m["fit_duration"])
+            num_examples_list.append(n)
 
-            mlflow.log_metric(f"{cid}_fit_examples", client_n, step=rnd)
-            num_examples_list.append(client_n)
-
-        return accs, losses, num_examples_list
+        return train_accs, train_losses, train_f1s, val_accs, val_losses, val_f1s, durations, num_examples_list
 
     def _log_client_eval_metrics(self, rnd, results):
-        """Extract and log individual client evaluation metrics to MLflow before aggregation."""
+        """Extract individual client evaluation metrics before aggregation."""
         accs = []
         num_examples_list = []
 
         for idx, (client, res) in enumerate(results):
-            cid = f"client_{idx + 1}"
             client_acc = res.metrics.get("accuracy")
-            client_loss = res.loss
             client_n = res.num_examples
 
-            # Log metrik individual per client sebelum agregasi (pembuktian FedAvg)
             if client_acc is not None:
-                mlflow.log_metric(f"{cid}_val_accuracy", client_acc, step=rnd)
                 accs.append(client_acc)
-            if client_loss is not None:
-                mlflow.log_metric(f"{cid}_val_loss", client_loss, step=rnd)
-
-            mlflow.log_metric(f"{cid}_val_examples", client_n, step=rnd)
             num_examples_list.append(client_n)
 
         return accs, num_examples_list
@@ -155,37 +149,45 @@ class MLflowStrategy(fl.server.strategy.FedAvg):
             for client, _ in results:
                 self.participant_clients.add(client.cid)
 
-            # Log jumlah client aktif pada ronde ini ke MLflow
-            mlflow.log_metric("active_fit_clients", len(results), step=rnd)
+            train_accs, train_losses, train_f1s, val_accs, val_losses, val_f1s, durations, num_examples_list = self._log_client_fit_metrics(rnd, results)
+            total_examples = sum(num_examples_list)
 
-            accs, losses, num_examples_list = self._log_client_fit_metrics(rnd, results)
+            def weighted_avg(values, counts):
+                if not values:
+                    return None
+                total = sum(counts)
+                if total == 0:
+                    return sum(values) / len(values)
+                return sum(v * n for v, n in zip(values, counts)) / total
 
-            # Log metrics ke parent run dengan menyertakan step=rnd
-            if accs:
-                # 1. Rata-rata Sederhana (Simple Average)
-                simple_avg_acc = sum(accs) / len(accs)
-                mlflow.log_metric("avg_train_accuracy", simple_avg_acc, step=rnd)
+            # --- Training Metrics (FedAvg) ---
+            fedavg_train_acc = weighted_avg(train_accs, num_examples_list)
+            fedavg_train_loss = weighted_avg(train_losses, num_examples_list)
+            fedavg_train_f1 = weighted_avg(train_f1s, num_examples_list)
 
-                # 2. Rata-rata Tertimbang (Weighted Average / FedAvg)
-                total_examples = sum(num_examples_list)
-                if total_examples > 0:
-                    weighted_avg_acc = sum(a * n for a, n in zip(accs, num_examples_list)) / total_examples
-                else:
-                    weighted_avg_acc = simple_avg_acc
-                mlflow.log_metric("fedavg_train_accuracy", weighted_avg_acc, step=rnd)
+            if fedavg_train_acc is not None:
+                mlflow.log_metric("fedavg_train_accuracy", fedavg_train_acc, step=rnd)
+            if fedavg_train_loss is not None:
+                mlflow.log_metric("fedavg_train_loss", fedavg_train_loss, step=rnd)
+            if fedavg_train_f1 is not None:
+                mlflow.log_metric("fedavg_train_f1", fedavg_train_f1, step=rnd)
 
-            if losses:
-                # 1. Rata-rata Sederhana (Simple Average)
-                simple_avg_loss = sum(losses) / len(losses)
-                mlflow.log_metric("avg_train_loss", simple_avg_loss, step=rnd)
+            # --- Validation Metrics (FedAvg dari fit) ---
+            fedavg_val_acc = weighted_avg(val_accs, num_examples_list)
+            fedavg_val_loss = weighted_avg(val_losses, num_examples_list)
+            fedavg_val_f1 = weighted_avg(val_f1s, num_examples_list)
 
-                # 2. Rata-rata Tertimbang (Weighted Average / FedAvg)
-                total_examples = sum(num_examples_list)
-                if total_examples > 0:
-                    weighted_avg_loss = sum(loss_val * n for loss_val, n in zip(losses, num_examples_list)) / total_examples
-                else:
-                    weighted_avg_loss = simple_avg_loss
-                mlflow.log_metric("fedavg_train_loss", weighted_avg_loss, step=rnd)
+            if fedavg_val_acc is not None:
+                mlflow.log_metric("fedavg_val_accuracy", fedavg_val_acc, step=rnd)
+            if fedavg_val_loss is not None:
+                mlflow.log_metric("fedavg_val_loss", fedavg_val_loss, step=rnd)
+            if fedavg_val_f1 is not None:
+                mlflow.log_metric("fedavg_val_f1", fedavg_val_f1, step=rnd)
+
+            # --- Fit Duration ---
+            if durations:
+                mlflow.log_metric("fedavg_fit_duration", sum(durations) / len(durations), step=rnd)
+                mlflow.log_metric("max_fit_duration", max(durations), step=rnd)
 
         return aggregated_result
 
@@ -200,14 +202,12 @@ class MLflowStrategy(fl.server.strategy.FedAvg):
             for client, _ in results:
                 self.participant_clients.add(client.cid)
 
-            # Log jumlah client aktif pada ronde ini ke MLflow
-            mlflow.log_metric("active_evaluate_clients", len(results), step=rnd)
-
             accs, num_examples_list = self._log_client_eval_metrics(rnd, results)
 
             # Log metrics global model ke parent run dengan menyertakan step=rnd
+            # Catatan: 'eval_val_*' berasal dari Flower evaluate() round (lebih akurat)
             if loss_aggregated is not None:
-                mlflow.log_metric("global_val_loss", loss_aggregated, step=rnd)
+                mlflow.log_metric("eval_val_loss", loss_aggregated, step=rnd)
 
             if accs:
                 # Menggunakan weighted average untuk accuracy berdasarkan jumlah sampel/data uji di tiap client
@@ -217,16 +217,14 @@ class MLflowStrategy(fl.server.strategy.FedAvg):
                 else:
                     weighted_acc = sum(accs) / len(accs)
 
-                # Log global_val_accuracy dan fedavg_val_accuracy secara konsisten
-                mlflow.log_metric("global_val_accuracy", weighted_acc, step=rnd)
-                mlflow.log_metric("fedavg_val_accuracy", weighted_acc, step=rnd)
+                mlflow.log_metric("eval_val_accuracy", weighted_acc, step=rnd)
 
                 # Cek dan simpan model terbaik berdasarkan akurasi tertinggi jika centralized tidak aktif
                 if not self.evaluate_fn and weighted_acc > self.best_accuracy:
                     self.best_accuracy = weighted_acc
                     self.best_weights = self.current_weights
                     self.best_round = rnd
-                    print(f"[ROUND {rnd}] New best global model achieved from client validation! Accuracy: {weighted_acc:.4f}")
+                    print(f"[ROUND {rnd}] New best global model achieved from client evaluation! Accuracy: {weighted_acc:.4f}")
 
             # Hanya log model terbaik & daftarkan ke Model Registry di ronde terakhir
             if rnd == config.FL_NUM_ROUNDS:

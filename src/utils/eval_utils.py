@@ -29,14 +29,22 @@ def evaluate_and_log_metrics(  # noqa: PLR0913
     probs = model_obj.predict_proba(X_test)
     preds = model_obj.predict(X_test)
 
+    from sklearn.metrics import f1_score, precision_score, recall_score
+
     # 2. Compute metrics
     loss = log_loss(y_test, probs, labels=[0, 1])
     acc = accuracy_score(y_test, preds)
+    precision = precision_score(y_test, preds, zero_division=0)
+    recall = recall_score(y_test, preds, zero_division=0)
+    f1 = f1_score(y_test, preds, zero_division=0)
 
     # 3. Log metrics to MLflow
     if mlflow.active_run() is not None:
         mlflow.log_metric(f"{metrics_prefix}_loss", loss, step=step)
         mlflow.log_metric(f"{metrics_prefix}_accuracy", acc, step=step)
+        mlflow.log_metric(f"{metrics_prefix}_precision", precision, step=step)
+        mlflow.log_metric(f"{metrics_prefix}_recall", recall, step=step)
+        mlflow.log_metric(f"{metrics_prefix}_f1", f1, step=step)
 
     # 4. Generate and log artifacts ONLY if artifact_path is provided
     if artifact_path is not None:

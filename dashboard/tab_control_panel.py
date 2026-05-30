@@ -45,7 +45,14 @@ def render_control_panel():  # noqa: PLR0912, PLR0915
 
         penalty = st.selectbox("Penalty (Regularization)", penalty_options, index=0, help="Type of regularization norm applied. Options depend on the selected solver.")
         c_val = st.number_input("Regularization Strength (C)", min_value=0.01, max_value=10.0, value=1.0, step=0.1, format="%.2f", help="Inverse of regularization strength. Lower values indicate stronger regularization.")
-        max_iter = st.slider("Max Iterations", min_value=100, max_value=5000, value=1000, step=100, help="Maximum number of iterations for the solver to converge.")
+        max_iter = st.slider(
+            "Local Epochs (Max Iterations per Round)",
+            min_value=1,
+            max_value=50,
+            value=1,
+            step=1,
+            help="Local epochs per round (MODEL_MAX_ITER). Use 1 for standard FedAvg with warm_start=True.",
+        )
 
         st.markdown("**Dataset Management (CSV)**")
         uploaded_target = st.selectbox("Target Dataset to Overwrite", ["Server (heart_disease_hungary_cleaned.csv)", "Client 1 (heart_disease_hungary_cleaned.csv)", "Client 2 (heart_disease_switzerland_cleaned.csv)"])

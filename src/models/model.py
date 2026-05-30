@@ -47,7 +47,7 @@ def get_lr_model():
 
     Saga/Liblinear support l1/l2; newton-cg/lbfgs/sag only support l2/None.
     """
-    max_iter = _get_env_int("MODEL_MAX_ITER", 1000)
+    max_iter = _get_env_int("MODEL_MAX_ITER", 1)
     solver = os.environ.get("MODEL_SOLVER", "saga")
     c = _get_env_float("MODEL_C", 1.0)
     penalty = os.environ.get("MODEL_PENALTY", "l2")
@@ -56,4 +56,4 @@ def get_lr_model():
         # Scikit-learn v1.2+ uses None instead of 'none'
         penalty = None
 
-    return LogisticRegression(max_iter=max_iter, solver=solver, C=c, penalty=penalty, warm_start=False, random_state=42)
+    return LogisticRegression(max_iter=max_iter, solver=solver, C=c, penalty=penalty, warm_start=True, random_state=42)

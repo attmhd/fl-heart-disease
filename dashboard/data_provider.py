@@ -188,11 +188,20 @@ def get_mlflow_evaluation_artifacts():  # noqa: PLR0912, PLR0915
     return results
 
 
-def fetch_metrics_from_mlflow():  # noqa: PLR0912
-    """Retrieve training progression metrics history directly from MLflow."""
+def fetch_metrics_from_mlflow():  # noqa: PLR0912, PLR0915
+    """Retrieve training progression metrics history directly from MLflow.
+
+    Returns:
+        tuple: (df_pivot, best_round, best_acc)
+            - df_pivot: DataFrame with columns [Round, ...metric display names...]
+            - best_round: round number of best centralized accuracy
+            - best_acc: best centralized accuracy value
+    """
     import mlflow
     import pandas as pd
     from mlflow.tracking import MlflowClient
+
+    _EMPTY = pd.DataFrame(columns=["Round"]), 0, 0.0
 
     try:
         mlflow.set_tracking_uri("http://localhost:5000")
@@ -201,14 +210,18 @@ def fetch_metrics_from_mlflow():  # noqa: PLR0912
         # 1. Fetch Experiment
         experiment = client.get_experiment_by_name("FL_Heart_Disease")
         if not experiment:
-            return pd.DataFrame(columns=["Round", "Centralized Accuracy", "Centralized Loss", "Client Val Accuracy"]), 0, 0.0
+            return _EMPTY
 
-        # 2. Get active runs sorted by start_time descending
-        runs = client.search_runs(experiment_ids=[experiment.experiment_id], order_by=["attribute.start_time DESC"], max_results=10)
+        # 2. Get recent runs sorted by start_time descending
+        runs = client.search_runs(
+            experiment_ids=[experiment.experiment_id],
+            order_by=["attribute.start_time DESC"],
+            max_results=20,
+        )
         if not runs:
-            return pd.DataFrame(columns=["Round", "Centralized Accuracy", "Centralized Loss", "Client Val Accuracy"]), 0, 0.0
+            return _EMPTY
 
-        # 3. Find the latest parent run (the server run)
+        # 3. Find the latest parent (server) run — no parentRunId tag
         server_run = None
         for run in runs:
             if "mlflow.parentRunId" not in run.data.tags:
@@ -216,61 +229,111 @@ def fetch_metrics_from_mlflow():  # noqa: PLR0912
                 break
 
         if not server_run:
-            return pd.DataFrame(columns=["Round", "Centralized Accuracy", "Centralized Loss", "Client Val Accuracy"]), 0, 0.0
+            return _EMPTY
 
         run_id = server_run.info.run_id
 
-        # 4. Fetch Core Server Metrics History
-        cent_acc = client.get_metric_history(run_id, "centralized_accuracy")
-        cent_loss = client.get_metric_history(run_id, "centralized_loss")
-        fedavg_acc = client.get_metric_history(run_id, "fedavg_val_accuracy")
+        # 4. Server-level aggregated metrics to fetch
+        # Maps: MLflow metric key → display name in chart
+        SERVER_METRICS = {
+            # FedAvg Training (aggregated from client fit())
+            "fedavg_train_accuracy": "FedAvg Train Accuracy",
+            "fedavg_train_loss": "FedAvg Train Loss",
+            "fedavg_train_f1": "FedAvg Train F1",
+            # FedAvg Validation (aggregated from client fit() local test set)
+            "fedavg_val_accuracy": "FedAvg Val Accuracy",
+            "fedavg_val_loss": "FedAvg Val Loss",
+            "fedavg_val_f1": "FedAvg Val F1",
+            # Flower evaluate() round (dedicated eval pass)
+            "eval_val_accuracy": "Eval Val Accuracy",
+            "eval_val_loss": "Eval Val Loss",
+            # Centralized evaluation on server dataset
+            "centralized_accuracy": "Centralized Accuracy",
+            "centralized_loss": "Centralized Loss",
+            "centralized_precision": "Centralized Precision",
+            "centralized_recall": "Centralized Recall",
+            "centralized_f1": "Centralized F1",
+            # Fit duration
+            "fedavg_fit_duration": "FedAvg Fit Duration (s)",
+            "max_fit_duration": "Max Fit Duration (s)",
+        }
 
-        # 5. Fetch Client-Specific Metrics History dynamically
-        client_metrics = {}
-        for key in server_run.data.metrics.keys():
-            if any(key.endswith(suffix) for suffix in ["_train_accuracy", "_train_loss", "_val_accuracy", "_val_loss"]):
-                client_metrics[key] = client.get_metric_history(run_id, key)
-
-        # 6. Pivot and align all metrics by Round (Step)
         records = {}
-        for m in cent_acc:
-            records.setdefault(m.step, {})["Centralized Accuracy"] = m.value
-        for m in cent_loss:
-            records.setdefault(m.step, {})["Centralized Loss"] = m.value
-        for m in fedavg_acc:
-            records.setdefault(m.step, {})["Client Val Accuracy"] = m.value
 
-        for key, history in client_metrics.items():
-            # Format display name: e.g., "client_1_train_accuracy" -> "Client 1 Train Accuracy"
-            parts = key.split("_")
-            display_name = " ".join(p.capitalize() for p in parts)
-            for m in history:
-                records.setdefault(m.step, {})[display_name] = m.value
+        for mlflow_key, display_name in SERVER_METRICS.items():
+            try:
+                history = client.get_metric_history(run_id, mlflow_key)
+                for m in history:
+                    records.setdefault(m.step, {})[display_name] = m.value
+            except Exception:
+                pass
 
-        df_list = []
-        for step, vals in records.items():
-            row = {"Round": step}
-            row.update(vals)
-            df_list.append(row)
+        # 5. Find corresponding client child runs
+        client_runs = [run for run in runs if run.data.tags.get("mlflow.parentRunId") == run_id]
 
+        # Client-level per-round metrics to fetch
+        CLIENT_METRICS = {
+            "train_accuracy": "Train Accuracy",
+            "train_loss": "Train Loss",
+            "train_f1": "Train F1",
+            "train_precision": "Train Precision",
+            "train_recall": "Train Recall",
+            "val_accuracy": "Val Accuracy",
+            "val_loss": "Val Loss",
+            "val_f1": "Val F1",
+            "val_precision": "Val Precision",
+            "val_recall": "Val Recall",
+            "param_norm": "Param Norm",
+            "delta_norm": "Delta Norm",
+            "fit_duration": "Fit Duration (s)",
+        }
+
+        for c_run in client_runs:
+            # Resolve client label: prefer CLIENT_ID tag, fallback to user tag
+            c_label = c_run.data.tags.get("mlflow.user") or c_run.data.tags.get("client_id") or "client"
+            # Normalize: "client_1" → "Client 1"
+            c_display = " ".join(p.capitalize() for p in c_label.split("_"))
+
+            for mlflow_key, suffix in CLIENT_METRICS.items():
+                try:
+                    history = client.get_metric_history(c_run.info.run_id, mlflow_key)
+                    display_name = f"{c_display} {suffix}"
+                    for m in history:
+                        records.setdefault(m.step, {})[display_name] = m.value
+                except Exception:
+                    pass
+
+        # 6. Build pivot DataFrame
+        df_list = [{"Round": step, **vals} for step, vals in records.items()]
         df_pivot = pd.DataFrame(df_list)
-        if df_pivot.empty:
-            df_pivot = pd.DataFrame(columns=["Round", "Centralized Accuracy", "Centralized Loss", "Client Val Accuracy"])
-        else:
-            df_pivot = df_pivot.sort_values("Round").reset_index(drop=True)
 
-        # Find best validation metrics
+        if df_pivot.empty:
+            return _EMPTY
+
+        df_pivot = df_pivot.sort_values("Round").reset_index(drop=True)
+
+        # 7. Determine best round from centralized accuracy (primary) or fedavg val (fallback)
         best_acc = 0.0
         best_round = 0
-        if cent_acc:
-            best_acc = max(m.value for m in cent_acc)
-            for m in cent_acc:
-                if m.value == best_acc:
-                    best_round = m.step
-                    break
+
+        try:
+            cent_hist = client.get_metric_history(run_id, "centralized_accuracy")
+            if cent_hist:
+                best_acc = max(m.value for m in cent_hist)
+                best_round = next(m.step for m in cent_hist if m.value == best_acc)
+        except Exception:
+            pass
+
+        if best_acc == 0.0:
+            try:
+                fed_hist = client.get_metric_history(run_id, "fedavg_val_accuracy")
+                if fed_hist:
+                    best_acc = max(m.value for m in fed_hist)
+                    best_round = next(m.step for m in fed_hist if m.value == best_acc)
+            except Exception:
+                pass
 
         return df_pivot, best_round, best_acc
 
     except Exception:
-        # Fallback if connection / query fails
-        return pd.DataFrame(columns=["Round", "Centralized Accuracy", "Centralized Loss", "Client Val Accuracy"]), 0, 0.0
+        return _EMPTY

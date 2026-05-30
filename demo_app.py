@@ -34,14 +34,45 @@ with st.sidebar:
 # Container list definition
 CONTAINERS = ["fl_server", "mlflow_server", "client_1", "client_2", "loki", "alloy"]
 
-# Fetch and parse telemetry data
+# ── Fetch all telemetry data ───────────────────────────────────────────────────
 all_logs = fetch_loki_logs(loki_url, '{container=~".+"}', limit=1000)
 stats = parse_metrics_and_progress(all_logs, CONTAINERS)
+
+# Attempt MLflow metric fetch (primary source) — used for metric cards too
+df_pivot_mlflow, mlflow_best_round, mlflow_best_acc = fetch_metrics_from_mlflow()
+
+# Resolve which source to use for the header metric cards
+if not df_pivot_mlflow.empty:
+    active_df = df_pivot_mlflow
+    card_best_round = mlflow_best_round
+    card_best_acc = mlflow_best_acc
+else:
+    active_df = stats["df_pivot"]
+    card_best_round = stats["best_round"]
+    card_best_acc = stats["best_accuracy"]
+
+# Derive current round from active_df
+if not active_df.empty and "Round" in active_df.columns:
+    card_current_round = int(active_df["Round"].max())
+else:
+    card_current_round = stats["current_round"]
+
+# Derive best FedAvg Val Accuracy from df (if available)
+fedavg_val_col = "FedAvg Val Accuracy"
+card_fedavg_val_acc = None
+if not active_df.empty and fedavg_val_col in active_df.columns:
+    card_fedavg_val_acc = active_df[fedavg_val_col].dropna().max()
+
+# Derive best FedAvg F1 Score from df (if available)
+fedavg_f1_col = "FedAvg Val F1"
+card_fedavg_f1 = None
+if not active_df.empty and fedavg_f1_col in active_df.columns:
+    card_fedavg_f1 = active_df[fedavg_f1_col].dropna().max()
 
 # Main UI layout header
 render_header()
 
-# Metric Row Cards
+# ── Metric Row Cards ────────────────────────────────────────────────────────────
 col1, col2, col3, col4 = st.columns(4, gap="medium")
 
 with col1:
@@ -49,7 +80,7 @@ with col1:
         f"""
     <div class="metric-card">
         <div class="metric-label">Current FL Round</div>
-        <div class="metric-value">{stats["current_round"] if stats["current_round"] > 0 else "—"}</div>
+        <div class="metric-value">{card_current_round if card_current_round > 0 else "—"}</div>
     </div>
     """,
         unsafe_allow_html=True,
@@ -59,8 +90,8 @@ with col2:
     st.markdown(
         f"""
     <div class="metric-card">
-        <div class="metric-label">Best Global Accuracy</div>
-        <div class="metric-value">{f"{stats['best_accuracy'] * 100:.2f}%" if stats['best_accuracy'] > 0 else "—"}</div>
+        <div class="metric-label">Best Centralized Accuracy</div>
+        <div class="metric-value">{f"{card_best_acc * 100:.2f}%" if card_best_acc > 0 else "—"}</div>
     </div>
     """,
         unsafe_allow_html=True,
@@ -70,8 +101,8 @@ with col3:
     st.markdown(
         f"""
     <div class="metric-card">
-        <div class="metric-label">Best Model Achieved At</div>
-        <div class="metric-value">{f"Round {stats['best_round']}" if stats['best_round'] > 0 else "—"}</div>
+        <div class="metric-label">FedAvg Val Accuracy</div>
+        <div class="metric-value">{f"{card_fedavg_val_acc * 100:.2f}%" if card_fedavg_val_acc is not None else "—"}</div>
     </div>
     """,
         unsafe_allow_html=True,
@@ -81,8 +112,8 @@ with col4:
     st.markdown(
         f"""
     <div class="metric-card">
-        <div class="metric-label">Participating Clients</div>
-        <div class="metric-value">{stats['active_clients_count']} Active</div>
+        <div class="metric-label">FedAvg Val F1 Score</div>
+        <div class="metric-value">{f"{card_fedavg_f1:.4f}" if card_fedavg_f1 is not None else "—"}</div>
     </div>
     """,
         unsafe_allow_html=True,
@@ -98,21 +129,8 @@ with tab_ctrl:
     render_control_panel()
 
 with tab1:
-    # 1. Attempt to fetch training progress metrics directly from MLflow
-    df_pivot_mlflow, mlflow_best_round, mlflow_best_acc = fetch_metrics_from_mlflow()
-
-    # 2. Fall back to Loki telemetry logs parsing if MLflow has no data
-    if not df_pivot_mlflow.empty:
-        active_df = df_pivot_mlflow
-        active_best_round = mlflow_best_round
-        active_best_acc = mlflow_best_acc
-    else:
-        active_df = stats["df_pivot"]
-        active_best_round = stats["best_round"]
-        active_best_acc = stats["best_accuracy"]
-
     mlflow_arts = get_mlflow_evaluation_artifacts()
-    render_monitor_tab(active_df, active_best_round, active_best_acc, mlflow_artifacts=mlflow_arts)
+    render_monitor_tab(active_df, card_best_round, card_best_acc, mlflow_artifacts=mlflow_arts)
 
 with tab2:
     docker_health = get_docker_health_states(CONTAINERS)

@@ -3,7 +3,7 @@ from datetime import datetime
 import flwr as fl
 import mlflow
 import numpy as np
-from sklearn.metrics import accuracy_score, log_loss
+from sklearn.metrics import accuracy_score, f1_score, log_loss, precision_score, recall_score
 
 from models import model
 from utils import data_utils, eval_utils, model_utils
@@ -24,24 +24,41 @@ class HeartDiseaseClient(fl.client.NumPyClient):
     def get_parameters(self, config):
         return model_utils.get_model_parameters(self.learner)
 
-    def fit(self, parameters, config):
+    def fit(self, parameters, config):  # noqa: PLR0915
+        import time
+
         model_utils.set_model_parameters(self.learner, parameters)
 
         # Global weights sebelum training
         global_weights = model_utils.get_model_parameters(self.learner)
 
-        # Training lokal
+        # Training lokal dengan pencatatan durasi
+        start_time = time.time()
         self.learner.fit(self.X_train, self.y_train)
+        fit_duration = time.time() - start_time
 
         # Local weights setelah training
         local_weights = model_utils.get_model_parameters(self.learner)
 
-        # Metrics
-        probs = self.learner.predict_proba(self.X_train)
-        preds = self.learner.predict(self.X_train)
+        # Training Metrics
+        train_probs = self.learner.predict_proba(self.X_train)
+        train_preds = self.learner.predict(self.X_train)
 
-        train_acc = accuracy_score(self.y_train, preds)
-        train_loss = log_loss(self.y_train, probs, labels=[0, 1])
+        train_acc = accuracy_score(self.y_train, train_preds)
+        train_loss = log_loss(self.y_train, train_probs, labels=[0, 1])
+        train_precision = precision_score(self.y_train, train_preds, zero_division=0)
+        train_recall = recall_score(self.y_train, train_preds, zero_division=0)
+        train_f1 = f1_score(self.y_train, train_preds, zero_division=0)
+
+        # Validation Metrics (pada data uji lokal)
+        val_probs = self.learner.predict_proba(self.X_test)
+        val_preds = self.learner.predict(self.X_test)
+
+        val_acc = accuracy_score(self.y_test, val_preds)
+        val_loss = log_loss(self.y_test, val_probs, labels=[0, 1])
+        val_precision = precision_score(self.y_test, val_preds, zero_division=0)
+        val_recall = recall_score(self.y_test, val_preds, zero_division=0)
+        val_f1 = f1_score(self.y_test, val_preds, zero_division=0)
 
         # Parameter analysis
         global_flat = model_utils.flatten_parameters(global_weights)
@@ -91,20 +108,42 @@ class HeartDiseaseClient(fl.client.NumPyClient):
                 log_dict[f"model_{k}"] = str(v)
             mlflow.log_params(log_dict)
 
-        # Log metrics langsung ke child run dengan step=current_round
+        # Log training metrics per ronde
         mlflow.log_metric("train_accuracy", train_acc, step=current_round)
         mlflow.log_metric("train_loss", train_loss, step=current_round)
+        mlflow.log_metric("train_precision", train_precision, step=current_round)
+        mlflow.log_metric("train_recall", train_recall, step=current_round)
+        mlflow.log_metric("train_f1", train_f1, step=current_round)
+
+        # Log validation metrics per ronde
+        mlflow.log_metric("val_accuracy", val_acc, step=current_round)
+        mlflow.log_metric("val_loss", val_loss, step=current_round)
+        mlflow.log_metric("val_precision", val_precision, step=current_round)
+        mlflow.log_metric("val_recall", val_recall, step=current_round)
+        mlflow.log_metric("val_f1", val_f1, step=current_round)
+
+        # Log weight change diagnostics
         mlflow.log_metric("param_norm", param_norm, step=current_round)
         mlflow.log_metric("delta_norm", delta_norm, step=current_round)
+        mlflow.log_metric("fit_duration", fit_duration, step=current_round)
 
         return (
             local_weights,
             len(self.X_train),
             {
                 "train_accuracy": train_acc,
-                "local_loss": train_loss,
+                "train_loss": train_loss,
+                "train_precision": float(train_precision),
+                "train_recall": float(train_recall),
+                "train_f1": float(train_f1),
+                "val_accuracy": val_acc,
+                "val_loss": val_loss,
+                "val_precision": float(val_precision),
+                "val_recall": float(val_recall),
+                "val_f1": float(val_f1),
                 "param_norm": float(param_norm),
                 "delta_norm": float(delta_norm),
+                "fit_duration": float(fit_duration),
             },
         )
 
