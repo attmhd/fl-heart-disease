@@ -84,7 +84,7 @@ def parse_metrics_and_progress(all_logs, containers):
     return {"current_round": current_round, "best_accuracy": best_accuracy, "best_round": best_round, "active_clients_count": len(active_clients_set), "df_pivot": df_pivot, "health_states": health_states}
 
 
-def get_mlflow_evaluation_artifacts():  # noqa: PLR0912
+def get_mlflow_evaluation_artifacts():  # noqa: PLR0912, PLR0915
     """Retrieve best model evaluation reports and confusion matrices from MLflow."""
     results = {}
     try:
@@ -122,17 +122,33 @@ def get_mlflow_evaluation_artifacts():  # noqa: PLR0912
             if run.data.tags.get("mlflow.parentRunId") == server_run.info.run_id:
                 client_runs.append(run)
 
+        import os
+
         # 1. Fetch Server Centralized Evaluation artifacts
         server_artifacts_local = {}
-        server_artifacts = client.list_artifacts(server_run.info.run_id, path="best_model_centralized_evaluation")
-        for art in server_artifacts:
-            local_path = mlflow.artifacts.download_artifacts(run_id=server_run.info.run_id, artifact_path=art.path)
-            # Read contents
-            if art.path.endswith(".txt"):
-                with open(local_path) as f:
-                    server_artifacts_local["report"] = f.read()
-            elif art.path.endswith(".png"):
-                server_artifacts_local["confusion_matrix"] = local_path
+        # Try direct host filesystem lookup first (highly reliable for mounted docker volumes)
+        local_path_base = os.path.join("mlruns", experiment.experiment_id, server_run.info.run_id, "artifacts", "best_model_centralized_evaluation")
+        if os.path.isdir(local_path_base):
+            for file in os.listdir(local_path_base):
+                full_file_path = os.path.join(local_path_base, file)
+                if file.endswith(".txt"):
+                    with open(full_file_path, encoding="utf-8") as f:
+                        server_artifacts_local["report"] = f.read()
+                elif file.endswith(".png"):
+                    server_artifacts_local["confusion_matrix"] = os.path.abspath(full_file_path)
+        else:
+            # Fallback to MLflow client API
+            try:
+                server_artifacts = client.list_artifacts(server_run.info.run_id, path="best_model_centralized_evaluation")
+                for art in server_artifacts:
+                    local_path = mlflow.artifacts.download_artifacts(run_id=server_run.info.run_id, artifact_path=art.path)
+                    if art.path.endswith(".txt"):
+                        with open(local_path, encoding="utf-8") as f:
+                            server_artifacts_local["report"] = f.read()
+                    elif art.path.endswith(".png"):
+                        server_artifacts_local["confusion_matrix"] = local_path
+            except Exception:
+                pass
 
         if server_artifacts_local:
             results["server"] = server_artifacts_local
@@ -141,14 +157,28 @@ def get_mlflow_evaluation_artifacts():  # noqa: PLR0912
         for c_run in client_runs:
             c_id = c_run.data.tags.get("mlflow.user") or "unknown_client"
             client_artifacts_local = {}
-            client_artifacts = client.list_artifacts(c_run.info.run_id, path="best_model_client_evaluation")
-            for art in client_artifacts:
-                local_path = mlflow.artifacts.download_artifacts(run_id=c_run.info.run_id, artifact_path=art.path)
-                if art.path.endswith(".txt"):
-                    with open(local_path) as f:
-                        client_artifacts_local["report"] = f.read()
-                elif art.path.endswith(".png"):
-                    client_artifacts_local["confusion_matrix"] = local_path
+            local_path_base = os.path.join("mlruns", experiment.experiment_id, c_run.info.run_id, "artifacts", "best_model_client_evaluation")
+            if os.path.isdir(local_path_base):
+                for file in os.listdir(local_path_base):
+                    full_file_path = os.path.join(local_path_base, file)
+                    if file.endswith(".txt"):
+                        with open(full_file_path, encoding="utf-8") as f:
+                            client_artifacts_local["report"] = f.read()
+                    elif file.endswith(".png"):
+                        client_artifacts_local["confusion_matrix"] = os.path.abspath(full_file_path)
+            else:
+                # Fallback to MLflow client API
+                try:
+                    client_artifacts = client.list_artifacts(c_run.info.run_id, path="best_model_client_evaluation")
+                    for art in client_artifacts:
+                        local_path = mlflow.artifacts.download_artifacts(run_id=c_run.info.run_id, artifact_path=art.path)
+                        if art.path.endswith(".txt"):
+                            with open(local_path, encoding="utf-8") as f:
+                                client_artifacts_local["report"] = f.read()
+                        elif art.path.endswith(".png"):
+                            client_artifacts_local["confusion_matrix"] = local_path
+                except Exception:
+                    pass
 
             if client_artifacts_local:
                 results[c_id] = client_artifacts_local
@@ -156,3 +186,91 @@ def get_mlflow_evaluation_artifacts():  # noqa: PLR0912
     except Exception as e:
         st.sidebar.warning(f"MLflow connection idle: {e}")
     return results
+
+
+def fetch_metrics_from_mlflow():  # noqa: PLR0912
+    """Retrieve training progression metrics history directly from MLflow."""
+    import mlflow
+    import pandas as pd
+    from mlflow.tracking import MlflowClient
+
+    try:
+        mlflow.set_tracking_uri("http://localhost:5000")
+        client = MlflowClient()
+
+        # 1. Fetch Experiment
+        experiment = client.get_experiment_by_name("FL_Heart_Disease")
+        if not experiment:
+            return pd.DataFrame(columns=["Round", "Centralized Accuracy", "Centralized Loss", "Client Val Accuracy"]), 0, 0.0
+
+        # 2. Get active runs sorted by start_time descending
+        runs = client.search_runs(experiment_ids=[experiment.experiment_id], order_by=["attribute.start_time DESC"], max_results=10)
+        if not runs:
+            return pd.DataFrame(columns=["Round", "Centralized Accuracy", "Centralized Loss", "Client Val Accuracy"]), 0, 0.0
+
+        # 3. Find the latest parent run (the server run)
+        server_run = None
+        for run in runs:
+            if "mlflow.parentRunId" not in run.data.tags:
+                server_run = run
+                break
+
+        if not server_run:
+            return pd.DataFrame(columns=["Round", "Centralized Accuracy", "Centralized Loss", "Client Val Accuracy"]), 0, 0.0
+
+        run_id = server_run.info.run_id
+
+        # 4. Fetch Core Server Metrics History
+        cent_acc = client.get_metric_history(run_id, "centralized_accuracy")
+        cent_loss = client.get_metric_history(run_id, "centralized_loss")
+        fedavg_acc = client.get_metric_history(run_id, "fedavg_val_accuracy")
+
+        # 5. Fetch Client-Specific Metrics History dynamically
+        client_metrics = {}
+        for key in server_run.data.metrics.keys():
+            if any(key.endswith(suffix) for suffix in ["_train_accuracy", "_train_loss", "_val_accuracy", "_val_loss"]):
+                client_metrics[key] = client.get_metric_history(run_id, key)
+
+        # 6. Pivot and align all metrics by Round (Step)
+        records = {}
+        for m in cent_acc:
+            records.setdefault(m.step, {})["Centralized Accuracy"] = m.value
+        for m in cent_loss:
+            records.setdefault(m.step, {})["Centralized Loss"] = m.value
+        for m in fedavg_acc:
+            records.setdefault(m.step, {})["Client Val Accuracy"] = m.value
+
+        for key, history in client_metrics.items():
+            # Format display name: e.g., "client_1_train_accuracy" -> "Client 1 Train Accuracy"
+            parts = key.split("_")
+            display_name = " ".join(p.capitalize() for p in parts)
+            for m in history:
+                records.setdefault(m.step, {})[display_name] = m.value
+
+        df_list = []
+        for step, vals in records.items():
+            row = {"Round": step}
+            row.update(vals)
+            df_list.append(row)
+
+        df_pivot = pd.DataFrame(df_list)
+        if df_pivot.empty:
+            df_pivot = pd.DataFrame(columns=["Round", "Centralized Accuracy", "Centralized Loss", "Client Val Accuracy"])
+        else:
+            df_pivot = df_pivot.sort_values("Round").reset_index(drop=True)
+
+        # Find best validation metrics
+        best_acc = 0.0
+        best_round = 0
+        if cent_acc:
+            best_acc = max(m.value for m in cent_acc)
+            for m in cent_acc:
+                if m.value == best_acc:
+                    best_round = m.step
+                    break
+
+        return df_pivot, best_round, best_acc
+
+    except Exception:
+        # Fallback if connection / query fails
+        return pd.DataFrame(columns=["Round", "Centralized Accuracy", "Centralized Loss", "Client Val Accuracy"]), 0, 0.0

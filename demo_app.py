@@ -1,7 +1,7 @@
 import time
 
 import streamlit as st
-from dashboard.data_provider import fetch_loki_logs, get_mlflow_evaluation_artifacts, parse_metrics_and_progress
+from dashboard.data_provider import fetch_loki_logs, fetch_metrics_from_mlflow, get_mlflow_evaluation_artifacts, parse_metrics_and_progress
 from dashboard.process_manager import get_docker_health_states, init_session_states
 
 # Import refactored dashboard modules
@@ -98,8 +98,21 @@ with tab_ctrl:
     render_control_panel()
 
 with tab1:
+    # 1. Attempt to fetch training progress metrics directly from MLflow
+    df_pivot_mlflow, mlflow_best_round, mlflow_best_acc = fetch_metrics_from_mlflow()
+
+    # 2. Fall back to Loki telemetry logs parsing if MLflow has no data
+    if not df_pivot_mlflow.empty:
+        active_df = df_pivot_mlflow
+        active_best_round = mlflow_best_round
+        active_best_acc = mlflow_best_acc
+    else:
+        active_df = stats["df_pivot"]
+        active_best_round = stats["best_round"]
+        active_best_acc = stats["best_accuracy"]
+
     mlflow_arts = get_mlflow_evaluation_artifacts()
-    render_monitor_tab(stats["df_pivot"], stats["best_round"], stats["best_accuracy"], mlflow_artifacts=mlflow_arts)
+    render_monitor_tab(active_df, active_best_round, active_best_acc, mlflow_artifacts=mlflow_arts)
 
 with tab2:
     docker_health = get_docker_health_states(CONTAINERS)

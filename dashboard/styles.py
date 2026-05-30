@@ -21,6 +21,7 @@ def apply_custom_styling():
             font-weight: 800;
             color: #000000;
             margin-bottom: 0.5rem;
+            margin-top: -3.5rem;
             letter-spacing: -0.02em;
         }
 
