@@ -13,6 +13,10 @@ os.environ["GIT_PYTHON_REFRESH"] = "quiet"
 # Suppress MLflow requirements/mismatch and future deprecation warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="mlflow")
 warnings.filterwarnings("ignore", category=FutureWarning, module="mlflow")
+from sklearn.exceptions import ConvergenceWarning
+
+warnings.filterwarnings("ignore", category=ConvergenceWarning)
+
 
 from datetime import datetime
 

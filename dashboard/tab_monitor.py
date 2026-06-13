@@ -62,7 +62,7 @@ def _classify_metrics(all_metrics: list):
     for m in all_metrics:
         ml = m.lower()
         is_train = "train" in ml or "fedavg train" in ml
-        is_val = "val" in ml or "centralized" in ml or "eval val" in ml
+        is_val = "val" in ml or "centralized" in ml
         is_acc = "accuracy" in ml
         is_loss = "loss" in ml and "duration" not in ml
         is_f1 = "f1" in ml or "precision" in ml or "recall" in ml
@@ -108,7 +108,7 @@ def render_monitor_tab(df_pivot, best_round, best_accuracy, mlflow_artifacts=Non
     )
 
     with st.expander("⚙️ Metric Filter Settings", expanded=True):
-        fc1, fc2, fc3 = st.columns(3, gap="medium")
+        fc1, fc2 = st.columns(2, gap="medium")
 
         MAX_DEFAULT_METRICS = 3
 
@@ -140,20 +140,6 @@ def render_monitor_tab(df_pivot, best_round, best_accuracy, mlflow_artifacts=Non
                 key="sel_val_loss",
             )
 
-        with fc3:
-            sel_train_f1 = st.multiselect(
-                "Training F1 / Precision / Recall",
-                options=train_f1,
-                default=train_f1,
-                key="sel_train_f1",
-            )
-            sel_val_f1 = st.multiselect(
-                "Validation F1 / Precision / Recall",
-                options=val_f1,
-                default=val_f1[:MAX_DEFAULT_METRICS] if len(val_f1) > MAX_DEFAULT_METRICS else val_f1,
-                key="sel_val_f1",
-            )
-
     # ──────────────────────────────────────────────
     # Row 1: Training Accuracy | Validation Accuracy
     # ──────────────────────────────────────────────
@@ -164,14 +150,14 @@ def render_monitor_tab(df_pivot, best_round, best_accuracy, mlflow_artifacts=Non
         st.markdown("<h4 style='color:#6366f1; font-weight:600; margin-bottom:0.5rem;'>Training Accuracy</h4>", unsafe_allow_html=True)
         st.plotly_chart(
             _make_chart("Training Accuracy per Round", "Accuracy", df_pivot, sel_train_acc),
-            use_container_width=True,
+            width="stretch",
         )
 
     with r1c2:
         st.markdown("<h4 style='color:#10b981; font-weight:600; margin-bottom:0.5rem;'>Validation Accuracy</h4>", unsafe_allow_html=True)
         st.plotly_chart(
             _make_chart("Validation Accuracy per Round", "Accuracy", df_pivot, sel_val_acc),
-            use_container_width=True,
+            width="stretch",
         )
 
     # ──────────────────────────────────────────────
@@ -183,35 +169,15 @@ def render_monitor_tab(df_pivot, best_round, best_accuracy, mlflow_artifacts=Non
         st.markdown("<h4 style='color:#ef4444; font-weight:600; margin-bottom:0.5rem;'>Training Loss</h4>", unsafe_allow_html=True)
         st.plotly_chart(
             _make_chart("Training Loss per Round", "Loss", df_pivot, sel_train_loss),
-            use_container_width=True,
+            width="stretch",
         )
 
     with r2c2:
         st.markdown("<h4 style='color:#f59e0b; font-weight:600; margin-bottom:0.5rem;'>Validation Loss</h4>", unsafe_allow_html=True)
         st.plotly_chart(
             _make_chart("Validation Loss per Round", "Loss", df_pivot, sel_val_loss),
-            use_container_width=True,
+            width="stretch",
         )
-
-    # ──────────────────────────────────────────────
-    # Row 3: Training F1/Precision/Recall | Validation F1/Precision/Recall
-    # ──────────────────────────────────────────────
-    if train_f1 or val_f1:
-        r3c1, r3c2 = st.columns(2, gap="medium")
-
-        with r3c1:
-            st.markdown("<h4 style='color:#8b5cf6; font-weight:600; margin-bottom:0.5rem;'>Training F1 / Precision / Recall</h4>", unsafe_allow_html=True)
-            st.plotly_chart(
-                _make_chart("Training F1 Score per Round", "Score", df_pivot, sel_train_f1),
-                use_container_width=True,
-            )
-
-        with r3c2:
-            st.markdown("<h4 style='color:#06b6d4; font-weight:600; margin-bottom:0.5rem;'>Validation F1 / Precision / Recall</h4>", unsafe_allow_html=True)
-            st.plotly_chart(
-                _make_chart("Validation F1 Score per Round", "Score", df_pivot, sel_val_f1),
-                use_container_width=True,
-            )
 
     # ──────────────────────────────────────────────
     # Row 4: Fit Duration (if available)
@@ -225,8 +191,8 @@ def render_monitor_tab(df_pivot, best_round, best_accuracy, mlflow_artifacts=Non
             key="sel_duration",
         )
         st.plotly_chart(
-            _make_chart("Fit Duration per Round (seconds)", "Seconds", df_pivot, sel_duration),
-            use_container_width=True,
+            _make_chart("Fit Duration per Round (ms)", "Milliseconds", df_pivot, sel_duration),
+            width="stretch",
         )
 
     # ──────────────────────────────────────────────
@@ -253,7 +219,7 @@ def render_monitor_tab(df_pivot, best_round, best_accuracy, mlflow_artifacts=Non
 
                 st.markdown("**Confusion Matrix**")
                 if "confusion_matrix" in node_data:
-                    st.image(node_data["confusion_matrix"], caption=f"Confusion Matrix — {node_key.upper()}", use_container_width=True)
+                    st.image(node_data["confusion_matrix"], caption=f"Confusion Matrix — {node_key.upper()}", width="stretch")
                 else:
                     st.info("No confusion matrix plot found.")
 

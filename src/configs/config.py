@@ -60,7 +60,7 @@ FL_FRACTION_FIT = _get_env_float("FL_FRACTION_FIT", 1.0)
 FL_FRACTION_EVALUATE = _get_env_float("FL_FRACTION_EVALUATE", 1.0)
 FL_MIN_FIT_CLIENTS = _get_env_int("FL_MIN_FIT_CLIENTS", 2)
 FL_MIN_EVALUATE_CLIENTS = _get_env_int("FL_MIN_EVALUATE_CLIENTS", 2)
-SERVER_DATASET_PATH = os.environ.get("SERVER_DATASET_PATH", "data/processed/heart_disease_hungary_cleaned.csv")
+SERVER_DATASET_PATH = os.environ.get("SERVER_DATASET_PATH", "data/processed/heart_disease_cleveland_cleaned.csv")
 
 """
 Distributed Client Node Settings

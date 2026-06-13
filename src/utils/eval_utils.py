@@ -19,32 +19,40 @@ def evaluate_and_log_metrics(  # noqa: PLR0913
     metrics_prefix="eval",
     step=None,
     title_suffix="",
+    model_id=None,
 ):
     """
     Evaluates the model on X_test, y_test.
     Generates and saves the classification report (txt, json) and confusion matrix plot.
     Logs them to MLflow active run along with loss and accuracy metrics.
+
+    Args:
+        model_id: MLflow 3.x LoggedModel ID. When provided, metrics are explicitly
+                  associated with that specific logged model (shown in model Overview).
     """
     # 1. Run predictions
     probs = model_obj.predict_proba(X_test)
     preds = model_obj.predict(X_test)
 
-    from sklearn.metrics import f1_score, precision_score, recall_score
+    from sklearn.metrics import precision_score, recall_score
 
     # 2. Compute metrics
     loss = log_loss(y_test, probs, labels=[0, 1])
     acc = accuracy_score(y_test, preds)
     precision = precision_score(y_test, preds, zero_division=0)
     recall = recall_score(y_test, preds, zero_division=0)
-    f1 = f1_score(y_test, preds, zero_division=0)
 
     # 3. Log metrics to MLflow
+    # Jika model_id disediakan (MLflow 3.x), kaitkan metrik langsung ke logged model
+    log_kwargs = {"step": step}
+    if model_id is not None:
+        log_kwargs["model_id"] = model_id
+
     if mlflow.active_run() is not None:
-        mlflow.log_metric(f"{metrics_prefix}_loss", loss, step=step)
-        mlflow.log_metric(f"{metrics_prefix}_accuracy", acc, step=step)
-        mlflow.log_metric(f"{metrics_prefix}_precision", precision, step=step)
-        mlflow.log_metric(f"{metrics_prefix}_recall", recall, step=step)
-        mlflow.log_metric(f"{metrics_prefix}_f1", f1, step=step)
+        mlflow.log_metric(f"{metrics_prefix}_loss", loss, **log_kwargs)
+        mlflow.log_metric(f"{metrics_prefix}_accuracy", acc, **log_kwargs)
+        mlflow.log_metric(f"{metrics_prefix}_precision", precision, **log_kwargs)
+        mlflow.log_metric(f"{metrics_prefix}_recall", recall, **log_kwargs)
 
     # 4. Generate and log artifacts ONLY if artifact_path is provided
     if artifact_path is not None:
@@ -68,8 +76,8 @@ def evaluate_and_log_metrics(  # noqa: PLR0913
                 fmt="d",
                 cmap="Blues",
                 cbar=False,
-                xticklabels=["Healthy", "Heart Disease"],
-                yticklabels=["Healthy", "Heart Disease"],
+                xticklabels=["Sehat (0)", "Sakit Jantung (1)"],
+                yticklabels=["Sehat (0)", "Sakit Jantung (1)"],
             )
             plt.title(f"Confusion Matrix {title_suffix}")
             plt.ylabel("Actual")

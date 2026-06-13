@@ -1,5 +1,3 @@
-import time
-
 import streamlit as st
 from dashboard.data_provider import fetch_loki_logs, fetch_metrics_from_mlflow, get_mlflow_evaluation_artifacts, parse_metrics_and_progress
 from dashboard.process_manager import get_docker_health_states, init_session_states
@@ -34,112 +32,111 @@ with st.sidebar:
 # Container list definition
 CONTAINERS = ["fl_server", "mlflow_server", "client_1", "client_2", "loki", "alloy"]
 
-# ── Fetch all telemetry data ───────────────────────────────────────────────────
-all_logs = fetch_loki_logs(loki_url, '{container=~".+"}', limit=1000)
-stats = parse_metrics_and_progress(all_logs, CONTAINERS)
-
-# Attempt MLflow metric fetch (primary source) — used for metric cards too
-df_pivot_mlflow, mlflow_best_round, mlflow_best_acc = fetch_metrics_from_mlflow()
-
-# Resolve which source to use for the header metric cards
-if not df_pivot_mlflow.empty:
-    active_df = df_pivot_mlflow
-    card_best_round = mlflow_best_round
-    card_best_acc = mlflow_best_acc
-else:
-    active_df = stats["df_pivot"]
-    card_best_round = stats["best_round"]
-    card_best_acc = stats["best_accuracy"]
-
-# Derive current round from active_df
-if not active_df.empty and "Round" in active_df.columns:
-    card_current_round = int(active_df["Round"].max())
-else:
-    card_current_round = stats["current_round"]
-
-# Derive best FedAvg Val Accuracy from df (if available)
-fedavg_val_col = "FedAvg Val Accuracy"
-card_fedavg_val_acc = None
-if not active_df.empty and fedavg_val_col in active_df.columns:
-    card_fedavg_val_acc = active_df[fedavg_val_col].dropna().max()
-
-# Derive best FedAvg F1 Score from df (if available)
-fedavg_f1_col = "FedAvg Val F1"
-card_fedavg_f1 = None
-if not active_df.empty and fedavg_f1_col in active_df.columns:
-    card_fedavg_f1 = active_df[fedavg_f1_col].dropna().max()
-
 # Main UI layout header
 render_header()
 
-# ── Metric Row Cards ────────────────────────────────────────────────────────────
-col1, col2, col3, col4 = st.columns(4, gap="medium")
+# Safe fragment decorator resolution
+if hasattr(st, "fragment"):
+    fragment_decorator = st.fragment
+elif hasattr(st, "experimental_fragment"):
+    fragment_decorator = st.experimental_fragment
+else:
 
-with col1:
-    st.markdown(
-        f"""
-    <div class="metric-card">
-        <div class="metric-label">Current FL Round</div>
-        <div class="metric-value">{card_current_round if card_current_round > 0 else "—"}</div>
-    </div>
-    """,
-        unsafe_allow_html=True,
-    )
+    def fragment_decorator(run_every=None):
+        def decorator(func):
+            return func
 
-with col2:
-    st.markdown(
-        f"""
-    <div class="metric-card">
-        <div class="metric-label">Best Centralized Accuracy</div>
-        <div class="metric-value">{f"{card_best_acc * 100:.2f}%" if card_best_acc > 0 else "—"}</div>
-    </div>
-    """,
-        unsafe_allow_html=True,
-    )
+        return decorator
 
-with col3:
-    st.markdown(
-        f"""
-    <div class="metric-card">
-        <div class="metric-label">FedAvg Val Accuracy</div>
-        <div class="metric-value">{f"{card_fedavg_val_acc * 100:.2f}%" if card_fedavg_val_acc is not None else "—"}</div>
-    </div>
-    """,
-        unsafe_allow_html=True,
-    )
 
-with col4:
-    st.markdown(
-        f"""
-    <div class="metric-card">
-        <div class="metric-label">FedAvg Val F1 Score</div>
-        <div class="metric-value">{f"{card_fedavg_f1:.4f}" if card_fedavg_f1 is not None else "—"}</div>
-    </div>
-    """,
-        unsafe_allow_html=True,
-    )
+# Wrap dynamic dashboard elements in a Streamlit fragment to prevent full-page reload on auto-refresh
+@fragment_decorator(run_every=refresh_interval if auto_refresh else None)
+def render_dynamic_dashboard():
+    # ── Fetch all telemetry data ───────────────────────────────────────────────────
+    all_logs = fetch_loki_logs(loki_url, '{container=~".+"}', limit=1000)
+    stats = parse_metrics_and_progress(all_logs, CONTAINERS)
 
-st.write("")
+    # Attempt MLflow metric fetch (primary source) — used for metric cards too
+    df_pivot_mlflow, mlflow_best_round, mlflow_best_acc = fetch_metrics_from_mlflow()
 
-# Create Tabs — no emoji icons, clean text labels
-tab_ctrl, tab1, tab2, tab3 = st.tabs(["Training Control Panel", "Federated Training Monitor", "Infrastructure Health", "System Logs"])
+    # Resolve which source to use for the header metric cards
+    if not df_pivot_mlflow.empty:
+        active_df = df_pivot_mlflow
+        card_best_round = mlflow_best_round
+        card_best_acc = mlflow_best_acc
+    else:
+        active_df = stats["df_pivot"]
+        card_best_round = stats["best_round"]
+        card_best_acc = stats["best_accuracy"]
 
-# Render each tab using its respective module function
-with tab_ctrl:
-    render_control_panel()
+    # Derive current round from active_df
+    if not active_df.empty and "Round" in active_df.columns:
+        card_current_round = int(active_df["Round"].max())
+    else:
+        card_current_round = stats["current_round"]
 
-with tab1:
-    mlflow_arts = get_mlflow_evaluation_artifacts()
-    render_monitor_tab(active_df, card_best_round, card_best_acc, mlflow_artifacts=mlflow_arts)
+    # Derive best FedAvg Val Accuracy from df (if available)
+    fedavg_val_col = "FedAvg Val Accuracy"
+    card_fedavg_val_acc = None
+    if not active_df.empty and fedavg_val_col in active_df.columns:
+        card_fedavg_val_acc = active_df[fedavg_val_col].dropna().max()
 
-with tab2:
-    docker_health = get_docker_health_states(CONTAINERS)
-    render_health_tab(docker_health, CONTAINERS)
+    # ── Metric Row Cards ────────────────────────────────────────────────────────────
+    col1, col2, col3 = st.columns(3, gap="medium")
 
-with tab3:
-    render_logs_tab(all_logs, CONTAINERS)
+    with col1:
+        st.markdown(
+            f"""
+        <div class="metric-card">
+            <div class="metric-label">Current FL Round</div>
+            <div class="metric-value">{card_current_round if card_current_round > 0 else "—"}</div>
+        </div>
+        """,
+            unsafe_allow_html=True,
+        )
 
-# Auto-refresh loop
-if auto_refresh:
-    time.sleep(refresh_interval)
-    st.rerun()
+    with col2:
+        st.markdown(
+            f"""
+        <div class="metric-card">
+            <div class="metric-label">Best Centralized Accuracy</div>
+            <div class="metric-value">{f"{card_best_acc * 100:.2f}%" if card_best_acc > 0 else "—"}</div>
+        </div>
+        """,
+            unsafe_allow_html=True,
+        )
+
+    with col3:
+        st.markdown(
+            f"""
+        <div class="metric-card">
+            <div class="metric-label">FedAvg Val Accuracy</div>
+            <div class="metric-value">{f"{card_fedavg_val_acc * 100:.2f}%" if card_fedavg_val_acc is not None else "—"}</div>
+        </div>
+        """,
+            unsafe_allow_html=True,
+        )
+
+    st.write("")
+
+    # Create Tabs — no emoji icons, clean text labels
+    tab_ctrl, tab1, tab2, tab3 = st.tabs(["Training Control Panel", "Federated Training Monitor", "Infrastructure Health", "System Logs"])
+
+    # Render each tab using its respective module function
+    with tab_ctrl:
+        render_control_panel()
+
+    with tab1:
+        mlflow_arts = get_mlflow_evaluation_artifacts()
+        render_monitor_tab(active_df, card_best_round, card_best_acc, mlflow_artifacts=mlflow_arts)
+
+    with tab2:
+        docker_health = get_docker_health_states(CONTAINERS)
+        render_health_tab(docker_health, CONTAINERS)
+
+    with tab3:
+        render_logs_tab(all_logs, CONTAINERS)
+
+
+# Run the dynamic dashboard fragment
+render_dynamic_dashboard()

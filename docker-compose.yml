@@ -32,7 +32,7 @@ services:
       - ./data:/app/data
     environment:
       - MLFLOW_TRACKING_URI=http://mlflow_server:5000
-      - SERVER_DATASET_PATH=/app/data/processed/heart_disease_hungary_cleaned.csv
+      - SERVER_DATASET_PATH=/app/data/processed/heart_disease_cleveland_cleaned.csv
       - GIT_PYTHON_REFRESH=quiet
       - FL_NUM_ROUNDS
       - FL_FRACTION_FIT

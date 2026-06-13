@@ -1,10 +1,11 @@
+import os
 from datetime import datetime
 
 import flwr as fl
 import mlflow
-import numpy as np
-from sklearn.metrics import accuracy_score, f1_score, log_loss, precision_score, recall_score
+from sklearn.metrics import accuracy_score, log_loss, precision_score, recall_score
 
+from configs import config as global_config
 from models import model
 from utils import data_utils, eval_utils, model_utils
 
@@ -29,13 +30,10 @@ class HeartDiseaseClient(fl.client.NumPyClient):
 
         model_utils.set_model_parameters(self.learner, parameters)
 
-        # Global weights sebelum training
-        global_weights = model_utils.get_model_parameters(self.learner)
-
         # Training lokal dengan pencatatan durasi
         start_time = time.time()
         self.learner.fit(self.X_train, self.y_train)
-        fit_duration = time.time() - start_time
+        fit_duration = (time.time() - start_time) * 1000  # in milliseconds
 
         # Local weights setelah training
         local_weights = model_utils.get_model_parameters(self.learner)
@@ -48,7 +46,6 @@ class HeartDiseaseClient(fl.client.NumPyClient):
         train_loss = log_loss(self.y_train, train_probs, labels=[0, 1])
         train_precision = precision_score(self.y_train, train_preds, zero_division=0)
         train_recall = recall_score(self.y_train, train_preds, zero_division=0)
-        train_f1 = f1_score(self.y_train, train_preds, zero_division=0)
 
         # Validation Metrics (pada data uji lokal)
         val_probs = self.learner.predict_proba(self.X_test)
@@ -58,14 +55,6 @@ class HeartDiseaseClient(fl.client.NumPyClient):
         val_loss = log_loss(self.y_test, val_probs, labels=[0, 1])
         val_precision = precision_score(self.y_test, val_preds, zero_division=0)
         val_recall = recall_score(self.y_test, val_preds, zero_division=0)
-        val_f1 = f1_score(self.y_test, val_preds, zero_division=0)
-
-        # Parameter analysis
-        global_flat = model_utils.flatten_parameters(global_weights)
-        local_flat = model_utils.flatten_parameters(local_weights)
-
-        param_norm = np.linalg.norm(local_flat)
-        delta_norm = np.linalg.norm(local_flat - global_flat)
 
         # Ambil informasi ronde dari config (dikirim oleh server)
         current_round = config.get("server_round")
@@ -113,18 +102,13 @@ class HeartDiseaseClient(fl.client.NumPyClient):
         mlflow.log_metric("train_loss", train_loss, step=current_round)
         mlflow.log_metric("train_precision", train_precision, step=current_round)
         mlflow.log_metric("train_recall", train_recall, step=current_round)
-        mlflow.log_metric("train_f1", train_f1, step=current_round)
 
         # Log validation metrics per ronde
         mlflow.log_metric("val_accuracy", val_acc, step=current_round)
         mlflow.log_metric("val_loss", val_loss, step=current_round)
         mlflow.log_metric("val_precision", val_precision, step=current_round)
         mlflow.log_metric("val_recall", val_recall, step=current_round)
-        mlflow.log_metric("val_f1", val_f1, step=current_round)
 
-        # Log weight change diagnostics
-        mlflow.log_metric("param_norm", param_norm, step=current_round)
-        mlflow.log_metric("delta_norm", delta_norm, step=current_round)
         mlflow.log_metric("fit_duration", fit_duration, step=current_round)
 
         return (
@@ -135,14 +119,10 @@ class HeartDiseaseClient(fl.client.NumPyClient):
                 "train_loss": train_loss,
                 "train_precision": float(train_precision),
                 "train_recall": float(train_recall),
-                "train_f1": float(train_f1),
                 "val_accuracy": val_acc,
                 "val_loss": val_loss,
                 "val_precision": float(val_precision),
                 "val_recall": float(val_recall),
-                "val_f1": float(val_f1),
-                "param_norm": float(param_norm),
-                "delta_norm": float(delta_norm),
                 "fit_duration": float(fit_duration),
             },
         )
@@ -162,7 +142,9 @@ class HeartDiseaseClient(fl.client.NumPyClient):
             is_final_round = is_final_round.lower() == "true"
 
         if is_final_round:
-            print(f"[{self.client_id}] Starting final evaluation on local dataset...")
+            best_round_info = config.get("best_round")
+            best_round_str = f" from Round {best_round_info}" if best_round_info is not None else ""
+            print(f"[{self.client_id}] Starting final evaluation on local dataset for best model{best_round_str}...")
             # Resubscribe/activate child run on this specific thread if it is not already active
             client_run = None
             if mlflow.active_run() is None:
@@ -186,20 +168,21 @@ class HeartDiseaseClient(fl.client.NumPyClient):
                         )
 
             try:
-                # Evaluate and log detailed metrics and plots using centralized eval_utils helper
+                dataset_name = os.path.basename(global_config.CLIENT_DATASET_PATH) if global_config.CLIENT_DATASET_PATH else "Unknown Dataset"
                 eval_utils.evaluate_and_log_metrics(
                     model_obj=self.learner,
                     X_test=self.X_test,
                     y_test=self.y_test,
                     artifact_path="best_model_client_evaluation",
                     metrics_prefix="best_model_client",
-                    title_suffix=f"- {self.client_id} (Best Model)",
+                    step=best_round_info if best_round_info is not None else config.get("server_round"),
+                    title_suffix=f"- {self.client_id} (Best Model{best_round_str})\nDataset: {dataset_name}",
                 )
             finally:
                 if client_run is not None:
                     mlflow.end_run()
 
-            print(f"[{self.client_id}] Best Model Final Evaluation Completed: Loss = {loss:.4f}, Accuracy = {acc:.4f}")
+            print(f"[{self.client_id}] Best Model{best_round_str} Final Evaluation Completed: Loss = {loss:.4f}, Accuracy = {acc:.4f}")
 
         return loss, len(self.X_test), {"accuracy": acc}
 

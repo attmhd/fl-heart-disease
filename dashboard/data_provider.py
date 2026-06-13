@@ -88,6 +88,12 @@ def get_mlflow_evaluation_artifacts():  # noqa: PLR0912, PLR0915
     """Retrieve best model evaluation reports and confusion matrices from MLflow."""
     results = {}
     try:
+        # Quick health check to prevent long timeout/hang if MLflow is offline
+        requests.get("http://localhost:5000", timeout=0.5)
+    except Exception:
+        return {}
+
+    try:
         import mlflow
         from mlflow.tracking import MlflowClient
 
@@ -188,7 +194,7 @@ def get_mlflow_evaluation_artifacts():  # noqa: PLR0912, PLR0915
     return results
 
 
-def fetch_metrics_from_mlflow():  # noqa: PLR0912, PLR0915
+def fetch_metrics_from_mlflow():  # noqa: PLR0912, PLR0915, PLR0911
     """Retrieve training progression metrics history directly from MLflow.
 
     Returns:
@@ -202,6 +208,12 @@ def fetch_metrics_from_mlflow():  # noqa: PLR0912, PLR0915
     from mlflow.tracking import MlflowClient
 
     _EMPTY = pd.DataFrame(columns=["Round"]), 0, 0.0
+
+    try:
+        # Quick health check to prevent long timeout/hang if MLflow is offline
+        requests.get("http://localhost:5000", timeout=0.5)
+    except Exception:
+        return _EMPTY
 
     try:
         mlflow.set_tracking_uri("http://localhost:5000")
@@ -239,23 +251,17 @@ def fetch_metrics_from_mlflow():  # noqa: PLR0912, PLR0915
             # FedAvg Training (aggregated from client fit())
             "fedavg_train_accuracy": "FedAvg Train Accuracy",
             "fedavg_train_loss": "FedAvg Train Loss",
-            "fedavg_train_f1": "FedAvg Train F1",
             # FedAvg Validation (aggregated from client fit() local test set)
             "fedavg_val_accuracy": "FedAvg Val Accuracy",
             "fedavg_val_loss": "FedAvg Val Loss",
-            "fedavg_val_f1": "FedAvg Val F1",
-            # Flower evaluate() round (dedicated eval pass)
-            "eval_val_accuracy": "Eval Val Accuracy",
-            "eval_val_loss": "Eval Val Loss",
             # Centralized evaluation on server dataset
             "centralized_accuracy": "Centralized Accuracy",
             "centralized_loss": "Centralized Loss",
             "centralized_precision": "Centralized Precision",
             "centralized_recall": "Centralized Recall",
-            "centralized_f1": "Centralized F1",
             # Fit duration
-            "fedavg_fit_duration": "FedAvg Fit Duration (s)",
-            "max_fit_duration": "Max Fit Duration (s)",
+            "fedavg_fit_duration": "FedAvg Fit Duration (ms)",
+            "max_fit_duration": "Max Fit Duration (ms)",
         }
 
         records = {}
@@ -275,17 +281,15 @@ def fetch_metrics_from_mlflow():  # noqa: PLR0912, PLR0915
         CLIENT_METRICS = {
             "train_accuracy": "Train Accuracy",
             "train_loss": "Train Loss",
-            "train_f1": "Train F1",
             "train_precision": "Train Precision",
             "train_recall": "Train Recall",
             "val_accuracy": "Val Accuracy",
             "val_loss": "Val Loss",
-            "val_f1": "Val F1",
             "val_precision": "Val Precision",
             "val_recall": "Val Recall",
             "param_norm": "Param Norm",
             "delta_norm": "Delta Norm",
-            "fit_duration": "Fit Duration (s)",
+            "fit_duration": "Fit Duration (ms)",
         }
 
         for c_run in client_runs:

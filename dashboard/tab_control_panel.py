@@ -55,14 +55,16 @@ def render_control_panel():  # noqa: PLR0912, PLR0915
         )
 
         st.markdown("**Dataset Management (CSV)**")
-        uploaded_target = st.selectbox("Target Dataset to Overwrite", ["Server (heart_disease_hungary_cleaned.csv)", "Client 1 (heart_disease_hungary_cleaned.csv)", "Client 2 (heart_disease_switzerland_cleaned.csv)"])
+        uploaded_target = st.selectbox("Target Dataset to Overwrite", ["Server (heart_disease_cleveland_cleaned.csv)", "Client 1 (heart_disease_hungary_cleaned.csv)", "Client 2 (heart_disease_switzerland_cleaned.csv)"])
 
         uploaded_file = st.file_uploader(f"Upload CSV for {uploaded_target.split(' ')[0]}", type=["csv"], help="Choose a processed heart disease CSV to overwrite the respective local dataset.")
 
         if uploaded_file is not None:
-            if st.button("Save & Overwrite Dataset", use_container_width=True):
+            if st.button("Save & Overwrite Dataset", width="stretch"):
                 target_filename = ""
-                if "Server" in uploaded_target or "Client 1" in uploaded_target:
+                if "Server" in uploaded_target:
+                    target_filename = "data/processed/heart_disease_cleveland_cleaned.csv"
+                elif "Client 1" in uploaded_target:
                     target_filename = "data/processed/heart_disease_hungary_cleaned.csv"
                 else:
                     target_filename = "data/processed/heart_disease_switzerland_cleaned.csv"
@@ -82,7 +84,7 @@ def render_control_panel():  # noqa: PLR0912, PLR0915
     col_btn1, col_btn2 = st.columns(2, gap="medium")
 
     with col_btn1:
-        if st.button("Launch Federated Training", use_container_width=True, type="primary"):
+        if st.button("Launch Federated Training", width="stretch", type="primary"):
             with st.spinner("Recreating Docker containers with custom environment variables..."):
                 start_docker_runs(rounds=rounds, solver=solver, max_iter=max_iter, c=c_val, penalty=penalty, fraction_fit=fraction_fit, fraction_evaluate=fraction_evaluate, min_fit_clients=min_fit_clients, min_evaluate_clients=min_evaluate_clients)
                 st.toast("Docker Compose triggered successfully.")
@@ -90,7 +92,7 @@ def render_control_panel():  # noqa: PLR0912, PLR0915
                 st.rerun()
 
     with col_btn2:
-        if st.button("Stop / Terminate Stack", use_container_width=True):
+        if st.button("Stop / Terminate Stack", width="stretch"):
             with st.spinner("Stopping Docker Compose services..."):
                 stop_docker_runs()
                 st.toast("Docker FL services stopped.")
@@ -104,7 +106,7 @@ def render_control_panel():  # noqa: PLR0912, PLR0915
     with col_log_header:
         st.markdown("**Active Execution Logs**")
     with col_log_btn:
-        if st.button("Clear Logs", use_container_width=True):
+        if st.button("Clear Logs", width="stretch"):
             try:
                 with open("local_fl_run.log", "w", encoding="utf-8") as f:
                     f.write("=== Logs cleared by User ===\n")
