@@ -1,0 +1,301 @@
+% ============================================================
+%  Architecture Diagram — Federated Learning System
+%  Strategy: arrows first (background), nodes on top
+% ============================================================
+\documentclass[border=16pt,tikz]{standalone}
+\usepackage{tikz}
+\usetikzlibrary{shapes.geometric, arrows.meta, positioning, fit, calc, backgrounds}
+\usepackage{fontawesome5}
+\usepackage{amsmath}
+
+% Colour palette
+\definecolor{colFL}   {RGB}{ 90,130,200}  % Federated Learning (blue)
+\definecolor{colTrk}  {RGB}{140, 80,180}  % Experiment Tracking (purple)
+\definecolor{colObs}  {RGB}{ 30,150,120}  % Observability (teal)
+\definecolor{colHost} {RGB}{ 80, 80, 80}  % Host / infrastructure (grey)
+\definecolor{colBound}{RGB}{180,180,180}  % Boundary / misc (light grey)
+\definecolor{colArrow}{RGB}{100,100,100}  % Generic arrows
+
+% Draw layers: background → arrows → nodes → labels
+\pgfdeclarelayer{bg}
+\pgfdeclarelayer{arrowlayer}
+\pgfdeclarelayer{nodelayer}
+\pgfsetlayers{bg,arrowlayer,nodelayer,main}
+
+% ── Styles ────────────────────────────────────────────────────
+\tikzset{
+  % Generic rounded box; border colour passed as argument
+  nodebox/.style={
+    rectangle, draw=#1, fill=white, line width=1.2pt,
+    rounded corners=8pt, inner sep=10pt,
+    minimum width=3.6cm, minimum height=1.2cm,
+    align=center, font=\sffamily
+  },
+  nodebox/.default=colHost,
+  nFL/.style  ={nodebox=colFL},
+  nTrk/.style ={nodebox=colTrk},
+  nObs/.style ={nodebox=colObs},
+  nHost/.style={nodebox=colHost},
+  % Database cylinder
+  db/.style={
+    cylinder, draw=colFL, fill=white, line width=1.0pt,
+    shape border rotate=90, aspect=0.28,
+    minimum width=2.2cm, minimum height=1.1cm,
+    align=center, font=\sffamily\small
+  },
+  % Side information boxes
+  infobox/.style={
+    rectangle, draw=#1, fill=white, line width=1.0pt,
+    rounded corners=8pt, inner sep=10pt,
+    align=left, font=\sffamily\small
+  },
+  infobox/.default=colFL,
+  % Arrow styles
+  arr/.style={
+    ->, draw=colArrow, line width=0.9pt,
+    >=Stealth, rounded corners=5pt
+  },
+  dasharr/.style={
+    ->, draw=colTrk, line width=0.8pt,
+    dashed, dash pattern=on 5pt off 2.5pt,
+    >=Stealth, rounded corners=8pt
+  },
+  grpcarr/.style={
+    <->, draw=colFL, line width=1.0pt,
+    >=Stealth, rounded corners=5pt
+  },
+  % Unidirectional FL arrow (colFL coloured, used in pairs)
+  flarr/.style={
+    ->, draw=colFL, line width=1.0pt,
+    >=Stealth, rounded corners=5pt
+  },
+  % Dashed group enclosure
+  boundary/.style={
+    draw=colBound, dashed, line width=0.9pt,
+    rounded corners=14pt, inner sep=20pt
+  },
+  % Edge label helper
+  el/.style={
+    fill=white, inner sep=2pt,
+    font=\sffamily\scriptsize, text=black!60
+  }
+}
+
+% Node content helpers
+\newcommand{\ntitle}[2]{{\normalsize\bfseries #1~~#2}}
+\newcommand{\nsub}[1]{\\[1pt]{\scriptsize\color{black!55}#1}}
+
+\begin{document}
+\begin{tikzpicture}[>=Stealth]
+
+% ── Layout grid (named coordinates) ────────────────────────────
+% Core nodes
+\coordinate (P_server)    at ( 0.0, 13.0);
+\coordinate (P_client1)   at (-2.8,  9.2);
+\coordinate (P_client2)   at ( 2.8,  9.2);
+\coordinate (P_db1)       at (-2.8,  6.2);
+\coordinate (P_db2)       at ( 2.8,  6.2);
+\coordinate (P_mlflow)    at (11.0, 13.0);
+\coordinate (P_registry)  at (11.0,  9.2);
+\coordinate (P_loki)      at (11.0,  6.2);
+\coordinate (P_alloy)     at (11.0,  3.2);
+\coordinate (P_docker)    at ( 0.0, 17.2);
+\coordinate (P_dashboard) at (11.0, 17.2);
+% Side info boxes
+\coordinate (P_fedavg)    at (-5.2, 13.0);
+\coordinate (P_poolcfg)   at (13.0,  3.2);
+% Outer right routing corridors (Pushed further right to avoid Pool Cfg)
+\coordinate (RbusA)       at (18.5, 13.0);
+\coordinate (RbusA_top)   at (18.5, 16.9);
+\coordinate (RbusB)       at (20.0,  6.2);
+\coordinate (RbusB_top)   at (20.0, 17.5);
+
+% ── Docker Compose boundary ─────────────────────────────────────
+\begin{pgfonlayer}{bg}
+  \node[boundary,
+        minimum width=18.4cm, minimum height=13.6cm,
+        anchor=center] (compose) at (3.85, 8.1) {};
+  \node[font=\sffamily\small\bfseries, text=colBound, anchor=south]
+    at (compose.north)
+    {Docker Compose Network~~(\texttt{fl\_network})};
+\end{pgfonlayer}
+
+% ── Arrows (drawn behind nodes) ────────────────────────────────
+\begin{pgfonlayer}{arrowlayer}
+
+  % Docker Daemon → Dashboard
+  \draw[arr] (P_docker) -- (P_dashboard)
+    node[midway, el]{\bfseries Docker Compose};
+
+  % Databases → Clients
+  \draw[arr] (P_db1) -- (P_client1);
+  \draw[arr] (P_db2) -- (P_client2);
+
+  % FL Server ↔ Clients (gRPC, bidirectional FL round-trip shown as two arrows)
+  % Each side: DOWN = server distributes global model,  UP = client returns local update
+  %
+  % Left pair (server ↔ client1) — DOWN turns at y=10.2, UP turns at y=11.4 (no crossing)
+  \draw[flarr]   % Server → Client1
+    (P_server)  ++(-1.1,-0.6) -- ++(0,-2.2) -- ++(-1.9,0) -- (P_client1) ++(-0.2,0.6);
+  \draw[flarr]   % Client1 → Server
+    (P_client1) ++(0.2,0.6)   -- ++(0, 1.6) -- ++(2.2,0)  -- (P_server)  ++(-0.4,-0.6);
+  %
+  % Right pair (server ↔ client2) — mirrored
+  \draw[flarr]   % Server → Client2
+    (P_server)  ++(1.1,-0.6)  -- ++(0,-2.2) -- ++(1.9,0)  -- (P_client2) ++(0.2,0.6);
+  \draw[flarr]   % Client2 → Server
+    (P_client2) ++(-0.2,0.6)  -- ++(0, 1.6) -- ++(-2.2,0) -- (P_server)  ++(0.4,-0.6);
+  %
+  \node[el, anchor=east] at (-1.5, 11.2) {$w_t$~~global};
+  \node[el, anchor=west] at ( 1.5, 11.2) {$\Delta w_t^{(k)}$~~local};
+
+  % FedAvg box connector (dotted)
+  \draw[draw=colBound, dotted, line width=0.7pt]
+    (P_fedavg) -- (P_server) ++(-1.8,0);
+
+  % FL Server → MLflow
+  \draw[dasharr]
+    (P_server) ++(1.8,0) -- (P_mlflow) ++(-1.9,0)
+    node[midway, el, align=center]{parent run / metrics};
+
+  % Client 1 & 2 → MLflow (down then right, enter from MLflow south)
+  \draw[dasharr]
+    (P_client1) ++(0,-0.6) -- ++(0,-1.0) -| ($(P_mlflow)+(-0.6,-0.9)$);
+  \draw[dasharr]
+    (P_client2) ++(0,-0.6) -- ++(0,-1.0) -| ($(P_mlflow)+(0.6,-0.9)$);
+  \node[el] at (4.1, 7.6) {child run};
+
+  % MLflow → Model Registry
+  \draw[arr]
+    (P_mlflow) ++(0,-0.9) -- (P_registry) ++(0,0.6)
+    node[midway, el]{register best};
+
+  % Alloy → Loki
+  \draw[arr]
+    (P_alloy) ++(0,0.6) -- (P_loki) ++(0,-0.6)
+    node[midway, el]{push logs};
+
+  % Pool config connector (dotted)
+  \draw[draw=colBound, dotted, line width=0.7pt]
+    (P_alloy) ++(1.8,0) -- (P_poolcfg);
+
+  % Outer LEFT bus: Docker → Alloy (Pushed to x = -11 to clear FedAvg)
+  \draw[arr]
+    (P_docker) ++(-1.8,0) -- (-11.0, 17.2) -- (-11.0, 3.2) -- (P_alloy) ++(-1.8,0);
+  \node[el, rotate=90] at (-11.0, 10.2) {socket mount};
+
+  % Outer RIGHT bus A: MLflow → Dashboard (Pushed to x = 18.5)
+  \draw[dasharr]
+    (P_mlflow) ++(2.0,0) -- (RbusA) -- (RbusA_top) |- ($(P_dashboard)+(1.8,-0.3)$);
+  \node[el, rotate=90] at (18.5, 15.0) {fetch metrics \& artifacts};
+
+  % Outer RIGHT bus B: Loki → Dashboard (Pushed to x = 20.0)
+  \draw[dasharr]
+    (P_loki) ++(1.8,0) -- (RbusB) -- (RbusB_top) |- ($(P_dashboard)+(1.8,0.3)$);
+  \node[el, rotate=90] at (20.0, 11.8) {log query~~:3100};
+
+\end{pgfonlayer}
+
+% ── Nodes (drawn on top of arrows) ─────────────────────────────
+\begin{pgfonlayer}{nodelayer}
+
+  % ── Infrastructure (host layer)
+  \node[nHost] (docker) at (P_docker) {
+    \ntitle{\faDocker}{Docker Daemon}
+    \nsub{\ttfamily /var/run/docker.sock}
+  };
+  \node[nHost] (dashboard) at (P_dashboard) {
+    \ntitle{\faDesktop}{Streamlit Dashboard}
+    \nsub{\ttfamily demo\_app.py~~(:8501)}
+  };
+
+  % ── FL Server
+  \node[nFL] (server) at (P_server) {
+    \ntitle{\faServer}{fl\_server}
+    \nsub{Flower ServerApp}\\[-2pt]
+    {\scriptsize\color{black!55}FedAvg $\cdot$ gRPC\,:8080}
+  };
+  \node[font=\sffamily\tiny\itshape, text=black!40, anchor=north]
+    at ($(server.south)+(0,-0.1)$) {Eval: Cleveland Dataset};
+
+  % FedAvg aggregation info box
+  \node[infobox=colFL, anchor=east] (fedavg) at (P_fedavg) {
+    {\small\bfseries FedAvg Aggregation}\\[5pt]
+    $\displaystyle w_{t+1}=\sum_{k=1}^{K}\!\frac{n_k}{n}\,w_k^{(t)}$\\[4pt]
+    {\scriptsize $K{=}2$ clients\quad rounds${}=N$}
+  };
+
+  % ── FL Clients
+  \node[nFL] (client1) at (P_client1) {
+    \ntitle{\faLaptop}{client\_1}
+    \nsub{Flower ClientApp · Logistic Reg.}
+  };
+  \node[nFL] (client2) at (P_client2) {
+    \ntitle{\faLaptop}{client\_2}
+    \nsub{Flower ClientApp · Logistic Reg.}
+  };
+
+  % ── Local datasets (cylinders)
+  \node[db] (db1) at (P_db1) {{\small Hungary}};
+  \node[db] (db2) at (P_db2) {{\small Switzerland}};
+
+  % ── MLflow tracking server
+  \node[nTrk] (mlflow) at (P_mlflow) {
+    \ntitle{\faChartLine}{mlflow\_server}
+    \nsub{\ttfamily :5000}\\[-2pt]
+    {\scriptsize\color{black!55}\faDatabase~Backend~~·~~\faFolderOpen~Artifacts}
+  };
+
+  % ── Model Registry
+  \node[nTrk] (registry) at (P_registry) {
+    \ntitle{\faArchive}{Model Registry}
+    \nsub{\ttfamily Heart\_Disease\_Global~~·~~\texttt{@champion}}
+  };
+
+  % ── Observability stack
+  \node[nObs] (loki) at (P_loki) {
+    \ntitle{\faStream}{loki}
+    \nsub{Grafana Loki~~·~~Log Storage\,:3100}
+  };
+  \node[nObs] (alloy) at (P_alloy) {
+    \ntitle{\faCogs}{alloy}
+    \nsub{Grafana Alloy~~·~~Log Collector}
+  };
+
+  % Pool config info box (outside boundary, right of Alloy)
+  \node[infobox=colObs, anchor=west] (pool_cfg) at (P_poolcfg) {
+    {\small\bfseries Pool Configuration}\\[3pt]
+    {\scriptsize 1.~4 Concurrent Sessions}\\
+    {\scriptsize 2.~5\,s Timeout}\\
+    {\scriptsize 3.~60\,s Health Checks}
+  };
+
+\end{pgfonlayer}
+
+% ── Phase labels ────────────────────────────────────────────────
+% Adjusted positions to clear the new outer bus corridors
+\node[font=\sffamily\large\bfseries, text=colBound!70, rotate= 90]
+  at (-12.5, 10.2)  {Federated Learning Phase};
+\node[font=\sffamily\large\bfseries, text=colBound!70, rotate=270]
+  at (21.5, 10.2) {Experiment Tracking Phase};
+
+% ── Legend ──────────────────────────────────────────────────────
+\node[anchor=north west,
+      draw=black!18, fill=white,
+      rounded corners=6pt, inner sep=8pt,
+      font=\sffamily\small]
+  at ($(compose.south west)+(0,-0.6)$) {%
+    \begin{tikzpicture}[baseline=(c.base)]
+      % gRPC: two parallel arrows showing FL round-trip
+      \draw[flarr] (0, 0.10)--(1.2, 0.10);
+      \draw[flarr] (1.2,-0.10)--(0,-0.10);
+      \node[right,black] at (1.2,0) {\small gRPC (Model / Updates)};
+      \draw[arr]     (5.8,0)--(7.0,0)
+        node[right,black]{\small Data / Control Flow};
+      \draw[dasharr] (11.6,0)--(12.8,0)
+        node[right,black](c){\small Tracking / Query};
+    \end{tikzpicture}%
+  };
+
+\end{tikzpicture}
+\end{document}
