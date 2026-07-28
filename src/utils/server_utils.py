@@ -1,9 +1,10 @@
 # ruff: noqa
-import logging
 import os
 import copy
 import flwr as fl
 import mlflow
+import logging
+
 from configs import config
 from data import dataset
 from models import model
@@ -93,7 +94,7 @@ class MLflowStrategy(fl.server.strategy.FedAvg):
                         self.best_accuracy = fedavg_val_acc
                         self.best_ndarrays = copy.deepcopy(self.current_ndarrays)
                         self.best_round = rnd
-                        print(f"[SERVER - DISTRIBUTED] New best model at Round {rnd}! FedAvg Val Accuracy: {fedavg_val_acc:.4f}")
+                        print(f"[SERVER - DISTRIBUTED] New best model at Round {rnd}! FedAvg Eval Accuracy: {fedavg_val_acc:.4f}")
             finally:
                 if server_run is not None:
                     mlflow.end_run()
@@ -150,6 +151,7 @@ class MLflowStrategy(fl.server.strategy.FedAvg):
             name="model",
             registered_model_name=model_name,
             serialization_format="skops",
+            step=best_rnd,
         )
         model_id = model_info.model_id if model_info is not None else None
         print(f"[SERVER] Best model (Round {best_rnd}) logged to MLflow. Model ID: {model_id}")
@@ -163,7 +165,7 @@ class MLflowStrategy(fl.server.strategy.FedAvg):
                     X_test=X_test_c,
                     y_test=y_test_c,
                     artifact_path="best_model_centralized_evaluation",
-                    metrics_prefix="centralized",
+                    metrics_prefix="centralized_eval",
                     step=best_rnd,
                     title_suffix=f"- Best Global Model (Centralized, Round {best_rnd})\nDataset: {dataset_name}",
                     model_id=model_id,
@@ -238,7 +240,24 @@ def get_evaluate_fn(test_dataset_path, server_run_id):
 
     def evaluate(server_round: int, parameters: fl.common.NDArrays, config_dict: dict):
         if server_round == 0:
-            print("[SERVER] Skipping centralized evaluation and logging at Round 0.")
+            print("[SERVER] Logging baseline centralized metrics at Round 0 (no model logging).")
+            lr_model = model.get_lr_model()
+            model_utils.set_model_parameters(lr_model, parameters)
+            server_run = None
+            if mlflow.active_run() is None:
+                server_run = mlflow.start_run(run_id=server_run_id)
+            try:
+                eval_utils.evaluate_and_log_metrics(
+                    model_obj=lr_model,
+                    X_test=X_test,
+                    y_test=y_test,
+                    artifact_path=None,
+                    metrics_prefix="centralized_eval",
+                    step=0,
+                )
+            finally:
+                if server_run is not None:
+                    mlflow.end_run()
             return None
         lr_model = model.get_lr_model()
         model_utils.set_model_parameters(lr_model, parameters)
@@ -252,7 +271,7 @@ def get_evaluate_fn(test_dataset_path, server_run_id):
                 X_test=X_test,
                 y_test=y_test,
                 artifact_path=None,
-                metrics_prefix="centralized",
+                metrics_prefix="centralized_eval",
                 step=server_round,
                 title_suffix=f"- Server Round {server_round}\nDataset: {dataset_name}",
             )

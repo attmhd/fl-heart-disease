@@ -61,8 +61,8 @@ def _classify_metrics(all_metrics: list):
 
     for m in all_metrics:
         ml = m.lower()
-        is_train = "train" in ml or "fedavg train" in ml
-        is_val = "val" in ml or "centralized" in ml
+        is_train = "train" in ml or ml in {"fedavg accuracy", "fedavg loss"}
+        is_val = "val" in ml or "eval" in ml or "centralized" in ml
         is_acc = "accuracy" in ml
         is_loss = "loss" in ml and "duration" not in ml
         is_f1 = "f1" in ml or "precision" in ml or "recall" in ml
@@ -103,7 +103,7 @@ def render_monitor_tab(df_pivot, best_round, best_accuracy, mlflow_artifacts=Non
     # Section: Multiselect filters
     # ──────────────────────────────────────────────
     st.markdown(
-        "<p style='color:#94a3b8; font-size:0.9rem; margin-top:-0.5rem;'>" "Filter specific server or client-side metrics to trace their progress over the FL rounds." "</p>",
+        "<p style='color:#94a3b8; font-size:0.9rem; margin-top:-0.5rem;'>Filter specific server or client-side metrics to trace their progress over the FL rounds.</p>",
         unsafe_allow_html=True,
     )
 
@@ -201,7 +201,7 @@ def render_monitor_tab(df_pivot, best_round, best_accuracy, mlflow_artifacts=Non
     if mlflow_artifacts:
         st.markdown("---")
         st.markdown('<div class="section-header">MLflow Evaluation Artifacts</div>', unsafe_allow_html=True)
-        st.write("Classification reports and confusion matrices for each node — retrieved directly from MLflow " "and displayed side-by-side for comparison.")
+        st.write("Classification reports and confusion matrices for each node — retrieved directly from MLflow and displayed side-by-side for comparison.")
 
         # Sort keys: server first, then client_1, client_2, etc.
         node_keys = sorted(

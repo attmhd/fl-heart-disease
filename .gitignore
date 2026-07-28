@@ -20,6 +20,6 @@ mlflow.db
 
 .pytest_cache/
 
-#docs/
+docs/
 
 *.log

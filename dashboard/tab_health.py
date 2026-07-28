@@ -25,7 +25,6 @@ def render_health_tab(health_states, containers):
     st.markdown('<div class="section-header">Real-time Connectivity Scan</div>', unsafe_allow_html=True)
     st.write("Verifies execution states and connection liveness of all services in the stack via Loki log scraping.")
 
-    # Generate columns for cards
     cols = st.columns(len(containers), gap="small")
 
     for idx, name in enumerate(containers):

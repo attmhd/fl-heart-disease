@@ -18,7 +18,6 @@ def render_control_panel():  # noqa: PLR0912, PLR0915
 
     st.markdown("---")
 
-    # Inputs layout
     col_inputs1, col_inputs2 = st.columns(2, gap="large")
 
     with col_inputs1:
@@ -35,7 +34,6 @@ def render_control_panel():  # noqa: PLR0912, PLR0915
         st.markdown("**Model Parameters — Logistic Regression**")
         solver = st.selectbox("Solver", ["saga", "lbfgs", "liblinear", "newton-cg"], index=0, help="Optimization algorithm for training the Logistic Regression estimator.")
 
-        # Dynamic penalty selection depending on solver compatibility
         if solver == "saga":
             penalty_options = ["l2", "l1", "none"]
         elif solver == "liblinear":
@@ -57,10 +55,17 @@ def render_control_panel():  # noqa: PLR0912, PLR0915
         st.markdown("**Dataset Management (CSV)**")
         uploaded_target = st.selectbox("Target Dataset to Overwrite", ["Server (heart_disease_cleveland_cleaned.csv)", "Client 1 (heart_disease_hungary_cleaned.csv)", "Client 2 (heart_disease_switzerland_cleaned.csv)"])
 
-        uploaded_file = st.file_uploader(f"Upload CSV for {uploaded_target.split(' ')[0]}", type=["csv"], help="Choose a processed heart disease CSV to overwrite the respective local dataset.")
+        uploaded_file = st.file_uploader(
+            f"Upload CSV for {uploaded_target.split(' ')[0]}",
+            type=["csv"],
+            help="Choose a processed heart disease CSV to overwrite the respective local dataset. (Max limit: 1 MB)",
+        )
 
         if uploaded_file is not None:
-            if st.button("Save & Overwrite Dataset", width="stretch"):
+            max_size_bytes = 1 * 1024 * 1024
+            if uploaded_file.size > max_size_bytes:
+                st.error(f"Ukuran file melebihi batas maksimal 1 MB ({uploaded_file.size / (1024 * 1024):.2f} MB). Silakan unggah file yang lebih kecil.")
+            elif st.button("Save & Overwrite Dataset", width="stretch"):
                 target_filename = ""
                 if "Server" in uploaded_target:
                     target_filename = "data/processed/heart_disease_cleveland_cleaned.csv"
@@ -79,7 +84,6 @@ def render_control_panel():  # noqa: PLR0912, PLR0915
                 except Exception as e:
                     st.error(f"Error saving dataset file: {e}")
 
-    # Control buttons
     st.markdown("---")
     col_btn1, col_btn2 = st.columns(2, gap="medium")
 
@@ -99,7 +103,6 @@ def render_control_panel():  # noqa: PLR0912, PLR0915
                 time.sleep(1)
                 st.rerun()
 
-    # Live logs sub-section
     st.markdown("---")
 
     col_log_header, col_log_btn = st.columns([4, 1])
@@ -121,7 +124,6 @@ def render_control_panel():  # noqa: PLR0912, PLR0915
             lines = f.readlines()
             log_content = "".join(lines[-150:])
 
-        # Scrollable log box
         st.markdown(
             f'<div style="height: 350px; overflow-y: auto; background-color: #0b0f19; border: 1px solid #1e293b; border-radius: 8px; padding: 12px; font-family: monospace; font-size: 13px; color: #cbd5e1; white-space: pre-wrap;">{log_content}</div>',
             unsafe_allow_html=True,

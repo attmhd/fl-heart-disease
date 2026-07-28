@@ -57,10 +57,8 @@ def get_lr_model():
     penalty = os.environ.get("MODEL_PENALTY", "l2")
 
     if penalty == "none":
-        # Scikit-learn v1.2+ uses None instead of 'none'
         penalty = None
 
-    # Map penalty to l1_ratio and C to avoid deprecation warning in scikit-learn 1.8+
     l1_ratio = 0.0
     if penalty == "l1":
         l1_ratio = 1.0

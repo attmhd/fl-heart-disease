@@ -3,12 +3,12 @@ import os
 import tempfile
 
 import matplotlib
-
-matplotlib.use("Agg")  # Headless mode for Docker
 import matplotlib.pyplot as plt
 import mlflow
 import seaborn as sns
-from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, log_loss
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, log_loss, precision_score, recall_score
+
+matplotlib.use("Agg")
 
 
 def evaluate_and_log_metrics(  # noqa: PLR0913
@@ -30,20 +30,14 @@ def evaluate_and_log_metrics(  # noqa: PLR0913
         model_id: MLflow 3.x LoggedModel ID. When provided, metrics are explicitly
                   associated with that specific logged model (shown in model Overview).
     """
-    # 1. Run predictions
     probs = model_obj.predict_proba(X_test)
     preds = model_obj.predict(X_test)
 
-    from sklearn.metrics import precision_score, recall_score
-
-    # 2. Compute metrics
     loss = log_loss(y_test, probs, labels=[0, 1])
     acc = accuracy_score(y_test, preds)
     precision = precision_score(y_test, preds, zero_division=0)
     recall = recall_score(y_test, preds, zero_division=0)
 
-    # 3. Log metrics to MLflow
-    # Jika model_id disediakan (MLflow 3.x), kaitkan metrik langsung ke logged model
     log_kwargs = {"step": step}
     if model_id is not None:
         log_kwargs["model_id"] = model_id
@@ -54,7 +48,6 @@ def evaluate_and_log_metrics(  # noqa: PLR0913
         mlflow.log_metric(f"{metrics_prefix}_precision", precision, **log_kwargs)
         mlflow.log_metric(f"{metrics_prefix}_recall", recall, **log_kwargs)
 
-    # 4. Generate and log artifacts ONLY if artifact_path is provided
     if artifact_path is not None:
         report_str = classification_report(y_test, preds, zero_division=0)
         report_dict = classification_report(y_test, preds, output_dict=True, zero_division=0)

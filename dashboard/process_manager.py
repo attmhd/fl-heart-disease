@@ -79,7 +79,6 @@ def start_local_runs(rounds, solver, max_iter, c, penalty):
         st.error(f"Failed to open log file: {e}")
         return False
 
-    # 1. Start Server
     try:
         server_proc = subprocess.Popen([sys.executable, "-m"] + LOCAL_SERVER_CMD, env=env, stdout=log_file, stderr=subprocess.STDOUT)
         st.session_state.server_pid = server_proc.pid
@@ -88,7 +87,6 @@ def start_local_runs(rounds, solver, max_iter, c, penalty):
         log_file.close()
         return False
 
-    # 2. Start Client 1
     try:
         env1 = env.copy()
         env1.update(LOCAL_CLIENT_1_ENV)
@@ -97,7 +95,6 @@ def start_local_runs(rounds, solver, max_iter, c, penalty):
     except Exception as e:
         log_file.write(f"Failed to start client_1: {e}\n")
 
-    # 3. Start Client 2
     try:
         env2 = env.copy()
         env2.update(LOCAL_CLIENT_2_ENV)
@@ -123,7 +120,6 @@ def start_docker_runs(rounds, solver, max_iter, c, penalty, fraction_fit=1.0, fr
     env["FL_MIN_FIT_CLIENTS"] = str(min_fit_clients)
     env["FL_MIN_EVALUATE_CLIENTS"] = str(min_evaluate_clients)
 
-    # Wrap with sg docker -c to bypass permission issues without needing interactive password
     cmd = ["sg", "docker", "-c", DOCKER_CMD_UP]
 
     try:
@@ -139,7 +135,7 @@ def start_docker_runs(rounds, solver, max_iter, c, penalty, fraction_fit=1.0, fr
     except Exception as e:
         st.error(f"Failed to trigger Docker Compose: {e}")
     finally:
-        if 'log_file' in locals() and not log_file.closed:
+        if "log_file" in locals() and not log_file.closed:
             log_file.close()
 
 
@@ -159,7 +155,7 @@ def stop_docker_runs():
     except Exception as e:
         st.error(f"Failed to stop Docker services: {e}")
     finally:
-        if 'log_file' in locals() and not log_file.closed:
+        if "log_file" in locals() and not log_file.closed:
             log_file.close()
 
 
@@ -167,13 +163,11 @@ def get_docker_health_states(containers):
     """Retrieve actual running states of Docker containers using docker compose ps."""
     states = {name: False for name in containers}
     try:
-        # Fetch status of running services in json format
         cmd = ["sg", "docker", "-c", DOCKER_CMD_PS]
         res = subprocess.run(cmd, capture_output=True, text=True, timeout=2.0, check=False)  # noqa: PLW1510
         if res.returncode == 0 and res.stdout.strip():
             import json
 
-            # docker compose ps can return a single JSON array or separate lines of JSON objects
             output = res.stdout.strip()
             if output.startswith("["):
                 services = json.loads(output)
@@ -181,11 +175,9 @@ def get_docker_health_states(containers):
                 services = [json.loads(line) for line in output.split("\n") if line.strip()]
 
             for svc in services:
-                # Keys can be 'Service' or 'Name', and 'State' or 'Status'
                 name = svc.get("Service") or svc.get("Name")
                 state = (svc.get("State") or svc.get("Status") or "").lower()
                 if name in states:
-                    # Mark active if state is running or healthy
                     states[name] = "running" in state or "up" in state or "healthy" in state
     except Exception:
         pass

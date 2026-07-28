@@ -8,25 +8,23 @@ strategy with client telemetry tracking, and starts the gRPC network listener.
 
 import os
 import warnings
-
-os.environ["GIT_PYTHON_REFRESH"] = "quiet"
-# Suppress MLflow requirements/mismatch and future deprecation warnings
-warnings.filterwarnings("ignore", category=UserWarning, module="mlflow")
-warnings.filterwarnings("ignore", category=FutureWarning, module="mlflow")
-from sklearn.exceptions import ConvergenceWarning
-
-warnings.filterwarnings("ignore", category=ConvergenceWarning)
-
-
 from datetime import datetime
 
 import flwr as fl
 import mlflow
+from flwr.server.compat.app import init_defaults, run_fl
+from flwr.server.superlink.fleet.grpc_bidi.grpc_server import start_grpc_server
+from sklearn.exceptions import ConvergenceWarning
 
 from configs import config
 from utils.server_utils import build_strategy_with_mlflow
 
-# MLflow setup
+os.environ["GIT_PYTHON_REFRESH"] = "quiet"
+warnings.filterwarnings("ignore", category=UserWarning, module="mlflow")
+warnings.filterwarnings("ignore", category=FutureWarning, module="mlflow")
+warnings.filterwarnings("ignore", category=ConvergenceWarning)
+
+
 mlflow.set_tracking_uri(config.MLFLOW_TRACKING_URI)
 mlflow.set_experiment(config.MLFLOW_EXPERIMENT_NAME)
 
@@ -59,7 +57,6 @@ def server_fn(context: fl.common.Context) -> fl.server.ServerAppComponents:
     return fl.server.ServerAppComponents(strategy=strategy, config=server_config)
 
 
-# Module-level ServerApp — loaded by flower-superexec (plugin-type=serverapp)
 app = fl.server.ServerApp(server_fn=server_fn)
 
 
@@ -83,10 +80,6 @@ def start_server():
         mlflow.log_params({"num_rounds": config.FL_NUM_ROUNDS, "strategy": "FedAvg"})
 
         strategy = build_strategy_with_mlflow(server_run_id)
-
-        # Use the new non-deprecated gRPC server path directly
-        from flwr.server.compat.app import init_defaults, run_fl
-        from flwr.server.superlink.fleet.grpc_bidi.grpc_server import start_grpc_server
 
         initialized_server, initialized_config = init_defaults(
             server=None,

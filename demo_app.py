@@ -57,29 +57,19 @@ def render_dynamic_dashboard():
     stats = parse_metrics_and_progress(all_logs, CONTAINERS)
 
     # Attempt MLflow metric fetch (primary source) — used for metric cards too
-    df_pivot_mlflow, mlflow_best_round, mlflow_best_acc = fetch_metrics_from_mlflow()
+    df_pivot_mlflow, mlflow_best_round, mlflow_best_acc, mlflow_best_loss = fetch_metrics_from_mlflow()
 
     # Resolve which source to use for the header metric cards
     if not df_pivot_mlflow.empty:
         active_df = df_pivot_mlflow
         card_best_round = mlflow_best_round
         card_best_acc = mlflow_best_acc
+        card_best_loss = mlflow_best_loss
     else:
         active_df = stats["df_pivot"]
         card_best_round = stats["best_round"]
         card_best_acc = stats["best_accuracy"]
-
-    # Derive current round from active_df
-    if not active_df.empty and "Round" in active_df.columns:
-        card_current_round = int(active_df["Round"].max())
-    else:
-        card_current_round = stats["current_round"]
-
-    # Derive best FedAvg Val Accuracy from df (if available)
-    fedavg_val_col = "FedAvg Val Accuracy"
-    card_fedavg_val_acc = None
-    if not active_df.empty and fedavg_val_col in active_df.columns:
-        card_fedavg_val_acc = active_df[fedavg_val_col].dropna().max()
+        card_best_loss = stats.get("best_loss", 0.0)
 
     # ── Metric Row Cards ────────────────────────────────────────────────────────────
     col1, col2, col3 = st.columns(3, gap="medium")
@@ -88,8 +78,8 @@ def render_dynamic_dashboard():
         st.markdown(
             f"""
         <div class="metric-card">
-            <div class="metric-label">Current FL Round</div>
-            <div class="metric-value">{card_current_round if card_current_round > 0 else "—"}</div>
+            <div class="metric-label">Best FL Round</div>
+            <div class="metric-value">{f"Round {card_best_round}" if card_best_round > 0 else "—"}</div>
         </div>
         """,
             unsafe_allow_html=True,
@@ -99,7 +89,7 @@ def render_dynamic_dashboard():
         st.markdown(
             f"""
         <div class="metric-card">
-            <div class="metric-label">Best Centralized Accuracy</div>
+            <div class="metric-label">Best Accuracy</div>
             <div class="metric-value">{f"{card_best_acc * 100:.2f}%" if card_best_acc > 0 else "—"}</div>
         </div>
         """,
@@ -110,8 +100,8 @@ def render_dynamic_dashboard():
         st.markdown(
             f"""
         <div class="metric-card">
-            <div class="metric-label">FedAvg Val Accuracy</div>
-            <div class="metric-value">{f"{card_fedavg_val_acc * 100:.2f}%" if card_fedavg_val_acc is not None else "—"}</div>
+            <div class="metric-label">Best Loss</div>
+            <div class="metric-value">{f"{card_best_loss:.4f}" if card_best_loss > 0 else "—"}</div>
         </div>
         """,
             unsafe_allow_html=True,
